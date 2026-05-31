@@ -1,17 +1,15 @@
 import type { Metadata } from 'next'
+import { viewport } from './viewport'
 import './globals.css'
 
+export { viewport }
+
 export const metadata: Metadata = {
-  title: 'Intraday Signal Dashboard',
-  description: 'Real-time intraday trading signals',
-  viewport: 'width=device-width, initial-scale=1',
+  title: 'Trading Signals',
+  description: 'Intraday and delivery trading signal dashboard',
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>{children}</body>

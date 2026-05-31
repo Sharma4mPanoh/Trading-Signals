@@ -1,209 +1,170 @@
-import { redis, keys } from './redis'
-import { TTL } from './constants'
-import type { StockState, StockTier, EntryPath } from './types'
+import { redis, KEYS } from './redis'
+import { TTL, INTRADAY_SCANS, DELIVERY_SCANS, SCAN_DESCRIPTIONS, DEFAULT_WINDOWS } from './constants'
+import type { Signal, SignalModule, SignalPath, TradingWindows, DashboardData } from './types'
 
-// Evaluate tier status from current flags
-export function evaluateTier(state: StockState): {
-  tier: StockTier
-  entryPath: EntryPath
-  entryConditionsMet: string[]
-  missingConditions: string[]
-} {
-  // STEP 1 — Blocked check takes absolute priority
-  if (state.I1_macd_bearish || state.I2_ema_below_vwap) {
-    const reasons = []
-    if (state.I1_macd_bearish) reasons.push('MACD bearish (3-min)')
-    if (state.I2_ema_below_vwap) reasons.push('10 EMA below VWAP')
-    return {
-      tier: 'BLOCKED',
-      entryPath: null,
-      entryConditionsMet: reasons,
-      missingConditions: [],
-    }
-  }
+// ─── IST Time Utilities ───────────────────────────────────────────────────────
 
-  // STEP 2 — Check Path 1 entry (VWAP Breakout)
-  // Requires: I3 + I4 + I5
-  const path1Met = []
-  const path1Missing = []
+export function getISTTime(): Date {
+  const now = new Date()
+  const istOffset = 5.5 * 60 * 60 * 1000
+  return new Date(now.getTime() + istOffset)
+}
 
-  if (state.I3_vwap_cross) path1Met.push('Price above VWAP')
-  else path1Missing.push('Price above VWAP')
+export function formatISTTime(date: Date): string {
+  return date.toISOString().slice(11, 16) // HH:MM
+}
 
-  if (state.I4_macd_bullish) path1Met.push('MACD bullish (5-min)')
-  else path1Missing.push('MACD bullish (5-min)')
+export function isMarketOpen(): boolean {
+  const ist = getISTTime()
+  const day = ist.getUTCDay()
+  if (day === 0 || day === 6) return false
+  const hhmm = formatISTTime(ist)
+  return hhmm >= '09:15' && hhmm <= '15:30'
+}
 
-  if (state.I5_rsi_spike) path1Met.push('RSI spike > 70 (1-min)')
-  else path1Missing.push('RSI confirmation')
+export function isInTradingWindow(windows: TradingWindows): boolean {
+  const ist = getISTTime()
+  const day = ist.getUTCDay()
+  if (day === 0 || day === 6) return false
 
-  if (path1Missing.length === 0) {
-    return {
-      tier: 'ENTRY',
-      entryPath: 'PATH1',
-      entryConditionsMet: path1Met,
-      missingConditions: [],
-    }
-  }
+  const hhmm = formatISTTime(ist)
 
-  // STEP 3 — Check Path 2 entry (EMA Pullback)
-  // Requires: I4 + I6 + (I7A or I7B) + I8
-  const path2Met = []
-  const path2Missing = []
+  const inMorning = windows.morning.enabled &&
+    hhmm >= windows.morning.start &&
+    hhmm <= windows.morning.end
 
-  if (state.I4_macd_bullish) path2Met.push('MACD bullish (5-min)')
-  else path2Missing.push('MACD bullish (5-min)')
+  const inAfternoon = windows.afternoon.enabled &&
+    hhmm >= windows.afternoon.start &&
+    hhmm <= windows.afternoon.end
 
-  if (state.I6_ema_stack) path2Met.push('10 EMA above 20 EMA')
-  else path2Missing.push('EMA stack (10 > 20)')
+  return inMorning || inAfternoon
+}
 
-  if (state.I7A_near_10ema || state.I7B_near_20ema) {
-    const ema = state.I7A_near_10ema ? '10 EMA' : '20 EMA'
-    path2Met.push(`Near ${ema} (pullback)`)
-  } else {
-    path2Missing.push('EMA pullback touch')
-  }
+// ─── Window Config ────────────────────────────────────────────────────────────
 
-  if (state.I8_rsi_cool) path2Met.push('RSI cooled 45-60')
-  else path2Missing.push('RSI cooldown (45-60)')
-
-  if (path2Missing.length === 0) {
-    return {
-      tier: 'ENTRY',
-      entryPath: 'PATH2',
-      entryConditionsMet: path2Met,
-      missingConditions: [],
-    }
-  }
-
-  // STEP 4 — Watchlist (partial conditions met)
-  const allMet = [...new Set([...path1Met, ...path2Met])]
-  if (allMet.length > 0) {
-    // Show the path closer to completion
-    const path1Progress = path1Met.length / 3
-    const path2Progress = path2Met.length / 4
-    const betterPath = path1Progress >= path2Progress ? path1Missing : path2Missing
-
-    return {
-      tier: 'WATCHLIST',
-      entryPath: null,
-      entryConditionsMet: allMet,
-      missingConditions: betterPath,
-    }
-  }
-
-  return {
-    tier: 'IDLE',
-    entryPath: null,
-    entryConditionsMet: [],
-    missingConditions: [],
+export async function getWindows(): Promise<TradingWindows> {
+  try {
+    const saved = await redis.get<TradingWindows>(KEYS.windows())
+    return saved ?? DEFAULT_WINDOWS
+  } catch {
+    return DEFAULT_WINDOWS
   }
 }
 
-// Process incoming webhook — update stock state in Redis
-export async function processWebhook(scanId: string, symbols: string[]): Promise<void> {
-  const now = new Date().toISOString()
+export async function saveWindows(windows: TradingWindows): Promise<void> {
+  await redis.set(KEYS.windows(), windows)
+}
+
+// ─── Signal Processing ────────────────────────────────────────────────────────
+
+export function getScanModule(scanId: string): SignalModule {
+  if (Object.keys(INTRADAY_SCANS).includes(scanId)) return 'INTRADAY'
+  if (Object.keys(DELIVERY_SCANS).includes(scanId)) return 'DELIVERY'
+  throw new Error(`Unknown scan ID: ${scanId}`)
+}
+
+export async function processWebhook(
+  scanId: string,
+  symbols: string[],
+  skipWindowCheck = false
+): Promise<{ processed: number; skipped: number; reason?: string }> {
+
+  const module = getScanModule(scanId)
+  const windows = await getWindows()
+
+  // For intraday scans — check trading window
+  if (module === 'INTRADAY' && !skipWindowCheck) {
+    if (!isInTradingWindow(windows)) {
+      return { processed: 0, skipped: symbols.length, reason: 'Outside trading window' }
+    }
+  }
+
+  const now = new Date()
+  const ttl = module === 'INTRADAY' ? TTL.INTRADAY_SIGNAL : TTL.DELIVERY_SIGNAL
+  const expiresAt = new Date(now.getTime() + ttl * 1000).toISOString()
+
+  let processed = 0
 
   for (const rawSymbol of symbols) {
     const symbol = rawSymbol.toUpperCase().trim()
-    if (!symbol) continue
+    if (!symbol || symbol.length > 20) continue
 
-    const key = keys.stock(symbol)
-
-    // Get existing state or create fresh
-    let existing = await redis.get<StockState>(key)
-
-    const state: StockState = existing ?? {
+    const signal: Signal = {
       symbol,
-      I1_macd_bearish: false,
-      I2_ema_below_vwap: false,
-      I3_vwap_cross: false,
-      I4_macd_bullish: false,
-      I5_rsi_spike: false,
-      I6_ema_stack: false,
-      I7A_near_10ema: false,
-      I7B_near_20ema: false,
-      I8_rsi_cool: false,
-      tier: 'IDLE',
-      entryPath: null,
-      entryConditionsMet: [],
-      missingConditions: [],
-      firstSeen: now,
-      lastUpdated: now,
-      signalAge: 0,
+      scanId: scanId as SignalPath,
+      module,
+      description: SCAN_DESCRIPTIONS[scanId] ?? scanId,
+      receivedAt: now.toISOString(),
+      expiresAt,
+      signalAgeMinutes: 0,
     }
 
-    // Apply the incoming scan signal
-    switch (scanId) {
-      case 'I1': state.I1_macd_bearish = true; break
-      case 'I2': state.I2_ema_below_vwap = true; break
-      case 'I3': state.I3_vwap_cross = true; break
-      case 'I4': state.I4_macd_bullish = true; break
-      case 'I5': state.I5_rsi_spike = true; break
-      case 'I6': state.I6_ema_stack = true; break
-      case 'I7A': state.I7A_near_10ema = true; break
-      case 'I7B': state.I7B_near_20ema = true; break
-      case 'I8': state.I8_rsi_cool = true; break
+    await redis.set(KEYS.signal(symbol, scanId), signal, { ex: ttl })
+    processed++
+  }
+
+  return { processed, skipped: 0 }
+}
+
+// ─── Dashboard Data ───────────────────────────────────────────────────────────
+
+export async function getDashboardData(): Promise<DashboardData> {
+  const [allKeys, windows] = await Promise.all([
+    redis.keys(KEYS.allSignals()),
+    getWindows(),
+  ])
+
+  const intraday: Signal[] = []
+  const delivery: Signal[] = []
+
+  if (allKeys && allKeys.length > 0) {
+    const pipeline = redis.pipeline()
+    for (const k of allKeys) pipeline.get(k)
+    const results = await pipeline.exec()
+
+    const now = Date.now()
+
+    for (const result of results) {
+      if (!result || typeof result !== 'object') continue
+      const signal = result as Signal
+
+      // Calculate live age
+      signal.signalAgeMinutes = Math.floor(
+        (now - new Date(signal.receivedAt).getTime()) / 60000
+      )
+
+      if (signal.module === 'INTRADAY') intraday.push(signal)
+      else delivery.push(signal)
     }
+  }
 
-    // Re-evaluate tier
-    const evaluation = evaluateTier(state)
-    state.tier = evaluation.tier
-    state.entryPath = evaluation.entryPath
-    state.entryConditionsMet = evaluation.entryConditionsMet
-    state.missingConditions = evaluation.missingConditions
-    state.lastUpdated = now
+  // Sort — newest first
+  const byAge = (a: Signal, b: Signal) => a.signalAgeMinutes - b.signalAgeMinutes
+  intraday.sort(byAge)
+  delivery.sort(byAge)
 
-    // Calculate signal age in minutes
-    const firstSeenMs = new Date(state.firstSeen).getTime()
-    state.signalAge = Math.floor((Date.now() - firstSeenMs) / 60000)
+  const ist = getISTTime()
 
-    // Set TTL based on tier
-    const ttl = state.tier === 'BLOCKED' ? TTL.BLOCKED_SIGNAL : TTL.BULLISH_SIGNAL
-
-    await redis.set(key, state, { ex: ttl })
+  return {
+    intraday,
+    delivery,
+    windows,
+    marketOpen: isMarketOpen(),
+    inActiveWindow: isInTradingWindow(windows),
+    currentTimeIST: ist.toISOString().slice(11, 19),
+    lastRefresh: new Date().toISOString(),
   }
 }
 
-// Fetch all current stock states from Redis
-export async function getAllStocks(): Promise<StockState[]> {
-  const pattern = keys.allStocks()
-  const stockKeys = await redis.keys(pattern)
+// ─── Clear All Signals ────────────────────────────────────────────────────────
 
-  if (!stockKeys || stockKeys.length === 0) return []
+export async function clearAllSignals(): Promise<number> {
+  const keys = await redis.keys(KEYS.allSignals())
+  if (!keys || keys.length === 0) return 0
 
   const pipeline = redis.pipeline()
-  for (const k of stockKeys) {
-    pipeline.get(k)
-  }
+  for (const k of keys) pipeline.del(k)
+  await pipeline.exec()
 
-  const results = await pipeline.exec()
-  const stocks: StockState[] = []
-
-  for (const result of results) {
-    if (result && typeof result === 'object') {
-      stocks.push(result as StockState)
-    }
-  }
-
-  return stocks
-}
-
-// Check if market is currently open (IST)
-export function isMarketOpen(): boolean {
-  const now = new Date()
-  // Convert to IST (UTC+5:30)
-  const istOffset = 5.5 * 60 * 60 * 1000
-  const ist = new Date(now.getTime() + istOffset)
-
-  const day = ist.getUTCDay() // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return false
-
-  const hours = ist.getUTCHours()
-  const minutes = ist.getUTCMinutes()
-  const totalMinutes = hours * 60 + minutes
-
-  const marketOpen = 9 * 60 + 15   // 9:15 AM
-  const marketClose = 15 * 60 + 30 // 3:30 PM
-
-  return totalMinutes >= marketOpen && totalMinutes <= marketClose
+  return keys.length
 }

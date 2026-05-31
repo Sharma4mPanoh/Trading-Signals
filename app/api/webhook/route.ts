@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { processWebhook } from '@/lib/logic'
-import { SCANS } from '@/lib/constants'
-
-// Chartink sends POST with form data or JSON
-// Payload typically: { stocks: "RELIANCE,HDFCBANK,TCS" } or similar
+import { ALL_SCAN_IDS } from '@/lib/constants'
 
 export async function POST(request: NextRequest) {
   try {
-    // Validate webhook secret if configured
+    // Validate secret
     const secret = process.env.WEBHOOK_SECRET
     if (secret) {
       const incoming = request.nextUrl.searchParams.get('secret')
@@ -16,95 +13,71 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Get scan ID from query param
+    // Get scan ID
     const scanId = request.nextUrl.searchParams.get('scan')?.toUpperCase()
-
-    if (!scanId || !Object.keys(SCANS).includes(scanId)) {
+    if (!scanId || !ALL_SCAN_IDS.includes(scanId as any)) {
       return NextResponse.json(
-        { error: `Invalid scan ID: ${scanId}. Must be one of: ${Object.keys(SCANS).join(', ')}` },
+        { error: `Invalid scan. Must be one of: ${ALL_SCAN_IDS.join(', ')}` },
         { status: 400 }
       )
     }
 
-    // Parse the request body — Chartink sends form-encoded data
+    // Parse symbols from body
     let symbols: string[] = []
-
     const contentType = request.headers.get('content-type') || ''
 
     if (contentType.includes('application/json')) {
       const body = await request.json()
-      // Handle various Chartink payload formats
-      const stockStr = body.stocks || body.symbols || body.data || ''
-      symbols = parseSymbols(stockStr)
+      symbols = parseSymbols(body.stocks || body.symbols || body.data || '')
     } else if (contentType.includes('application/x-www-form-urlencoded')) {
-      const formData = await request.formData()
-      const stockStr = formData.get('stocks')?.toString() ||
-                       formData.get('symbols')?.toString() || ''
-      symbols = parseSymbols(stockStr)
+      const form = await request.formData()
+      symbols = parseSymbols(form.get('stocks')?.toString() || form.get('symbols')?.toString() || '')
     } else {
-      // Try to parse as text
-      const text = await request.text()
-      symbols = parseSymbols(text)
+      symbols = parseSymbols(await request.text())
     }
 
     if (symbols.length === 0) {
-      return NextResponse.json(
-        { message: 'No symbols found in payload', scanId },
-        { status: 200 }
-      )
+      return NextResponse.json({ message: 'No symbols in payload', scanId }, { status: 200 })
     }
 
-    // Process the webhook — update Redis state
-    await processWebhook(scanId, symbols)
+    const result = await processWebhook(scanId, symbols)
 
     return NextResponse.json({
       success: true,
       scanId,
-      symbolsProcessed: symbols.length,
-      symbols,
+      ...result,
       timestamp: new Date().toISOString(),
     })
 
   } catch (error) {
     console.error('Webhook error:', error)
-    return NextResponse.json(
-      { error: 'Internal server error', details: String(error) },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: String(error) }, { status: 500 })
   }
 }
 
-// Also handle GET for manual testing
+// GET for browser testing
 export async function GET(request: NextRequest) {
-  const scanId = request.nextUrl.searchParams.get('scan')
+  const scanId = request.nextUrl.searchParams.get('scan')?.toUpperCase()
   const symbolsParam = request.nextUrl.searchParams.get('symbols') || 'RELIANCE,HDFCBANK'
 
   if (!scanId) {
     return NextResponse.json({
       message: 'Webhook endpoint active',
-      usage: 'POST /api/webhook?scan=I1 with body: { stocks: "SYMBOL1,SYMBOL2" }',
-      availableScans: Object.keys(SCANS),
-      testUrl: '/api/webhook?scan=I3&symbols=RELIANCE,TCS (GET for testing)',
+      availableScans: ALL_SCAN_IDS,
+      testUrl: '/api/webhook?scan=VWAP_BREAKOUT&symbols=RELIANCE,TCS&secret=YOUR_SECRET',
     })
   }
 
-  // Allow GET-based testing
   const symbols = parseSymbols(symbolsParam)
-  await processWebhook(scanId.toUpperCase(), symbols)
+  const result = await processWebhook(scanId, symbols, true) // skip window check for testing
 
-  return NextResponse.json({
-    success: true,
-    message: 'Test webhook processed',
-    scanId: scanId.toUpperCase(),
-    symbols,
-  })
+  return NextResponse.json({ success: true, scanId, symbols, ...result })
 }
 
 function parseSymbols(input: string): string[] {
   if (!input) return []
-  // Handle comma, newline, or space separated symbols
   return input
     .split(/[,\n\s]+/)
     .map(s => s.trim().toUpperCase())
-    .filter(s => s.length > 0 && s.length <= 20) // Basic sanity check
+    .filter(s => s.length > 0 && s.length <= 20)
 }

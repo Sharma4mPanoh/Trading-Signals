@@ -1,562 +1,492 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import type { DashboardData, StockState } from '@/lib/types'
+import type { DashboardData, Signal, TradingWindows } from '@/lib/types'
 import { POLLING } from '@/lib/constants'
 
-// ─── Utility ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatTime(iso: string): string {
+function fmtAge(mins: number): string {
+  if (mins < 1) return 'just now'
+  if (mins === 1) return '1 min ago'
+  if (mins < 60) return `${mins} mins ago`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m > 0 ? `${h}h ${m}m ago` : `${h}h ago`
+}
+
+function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-IN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZone: 'Asia/Kolkata',
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
   })
 }
 
-function formatAge(minutes: number): string {
-  if (minutes < 1) return 'just now'
-  if (minutes === 1) return '1 min ago'
-  return `${minutes} mins ago`
+const PATH_COLORS: Record<string, string> = {
+  VWAP_BREAKOUT:     '#3d8ef0',
+  EMA_PULLBACK:      '#a78bfa',
+  MOMENTUM_BREAKOUT: '#00cc88',
+  TREND_PULLBACK:    '#f0b429',
 }
 
-function getPathLabel(path: string | null): string {
-  if (path === 'PATH1') return 'VWAP Breakout'
-  if (path === 'PATH2') return 'EMA Pullback'
-  return ''
+const PATH_LABELS: Record<string, string> = {
+  VWAP_BREAKOUT:     'VWAP Breakout',
+  EMA_PULLBACK:      'EMA Pullback',
+  MOMENTUM_BREAKOUT: 'Momentum Breakout',
+  TREND_PULLBACK:    'Trend Pullback',
 }
 
-function getPathColor(path: string | null): string {
-  if (path === 'PATH1') return '#4d9fff'
-  if (path === 'PATH2') return '#a78bfa'
-  return '#7a9cc0'
-}
+// ─── Signal Card ─────────────────────────────────────────────────────────────
 
-// ─── Components ─────────────────────────────────────────────────────────────
-
-function LiveDot({ color }: { color: string }) {
-  return (
-    <span style={{
-      display: 'inline-block',
-      width: 8,
-      height: 8,
-      borderRadius: '50%',
-      background: color,
-      animation: 'pulse 2s ease-in-out infinite',
-      flexShrink: 0,
-    }} />
-  )
-}
-
-function EntryCard({ stock }: { stock: StockState }) {
-  const pathColor = getPathColor(stock.entryPath)
-  const pathLabel = getPathLabel(stock.entryPath)
+function SignalCard({ signal }: { signal: Signal }) {
+  const color = PATH_COLORS[signal.scanId] ?? '#3d8ef0'
+  const label = PATH_LABELS[signal.scanId] ?? signal.scanId
+  const isDelivery = signal.module === 'DELIVERY'
 
   return (
-    <div style={{
+    <div className="fade-up" style={{
       background: 'var(--bg-card)',
-      border: '1px solid var(--green-dim)',
-      borderLeft: '3px solid var(--green)',
+      border: `1px solid ${color}30`,
+      borderLeft: `3px solid ${color}`,
       borderRadius: 8,
       padding: '14px 16px',
-      animation: 'fadeIn 0.3s ease forwards',
       position: 'relative',
       overflow: 'hidden',
     }}>
-      {/* Green glow background */}
       <div style={{
-        position: 'absolute',
-        inset: 0,
-        background: 'var(--green-glow)',
+        position: 'absolute', inset: 0,
+        background: `${color}08`,
         pointerEvents: 'none',
       }} />
-
       <div style={{ position: 'relative' }}>
-        {/* Header row */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+
+        {/* Top row */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <LiveDot color="var(--green)" />
+            {/* Live dot */}
+            <span className="pulse" style={{
+              display: 'inline-block', width: 7, height: 7,
+              borderRadius: '50%', background: color, flexShrink: 0,
+            }} />
+            {/* Symbol */}
             <span style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 16,
-              fontWeight: 600,
-              color: 'var(--text-primary)',
-              letterSpacing: '0.05em',
+              fontFamily: 'var(--mono)', fontSize: 16, fontWeight: 600,
+              color: 'var(--text)', letterSpacing: '0.04em',
             }}>
-              {stock.symbol}
+              {signal.symbol}
             </span>
+            {/* Path badge */}
             <span style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: pathColor,
-              background: `${pathColor}18`,
-              border: `1px solid ${pathColor}40`,
-              borderRadius: 4,
-              padding: '2px 8px',
-              fontFamily: 'var(--font-mono)',
+              fontSize: 11, fontWeight: 500, color: color,
+              background: `${color}18`,
+              border: `1px solid ${color}35`,
+              borderRadius: 4, padding: '2px 8px',
+              fontFamily: 'var(--mono)',
             }}>
-              {pathLabel}
+              {label}
             </span>
           </div>
-          <span style={{
-            fontSize: 11,
-            color: 'var(--text-muted)',
-            fontFamily: 'var(--font-mono)',
-          }}>
-            {formatAge(stock.signalAge)}
+          <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
+            {fmtAge(signal.signalAgeMinutes)}
           </span>
         </div>
 
-        {/* Conditions met */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {stock.entryConditionsMet.map((condition, i) => (
-            <span key={i} style={{
-              fontSize: 11,
-              color: 'var(--green)',
-              background: 'var(--green-dim)',
-              borderRadius: 4,
-              padding: '3px 8px',
-              fontFamily: 'var(--font-mono)',
-            }}>
-              ✓ {condition}
-            </span>
-          ))}
+        {/* Description */}
+        <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 6 }}>
+          {signal.description}
         </div>
 
-        {/* Last updated */}
-        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          Updated: {formatTime(stock.lastUpdated)}
+        {/* Footer */}
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
+          Received: {fmtTime(signal.receivedAt)}
+          {isDelivery && (
+            <span style={{ marginLeft: 12, color: 'var(--yellow)', fontSize: 11 }}>
+              Daily chart
+            </span>
+          )}
         </div>
+
       </div>
     </div>
   )
 }
 
-function WatchlistCard({ stock }: { stock: StockState }) {
+// ─── Empty State ──────────────────────────────────────────────────────────────
+
+function EmptyState({ tab, marketOpen, inWindow }: {
+  tab: 'intraday' | 'delivery'
+  marketOpen: boolean
+  inWindow: boolean
+}) {
+  if (tab === 'delivery') {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-3)' }}>
+        <div style={{ fontSize: 28, marginBottom: 10 }}>📊</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 13, marginBottom: 6 }}>No delivery signals</div>
+        <div style={{ fontSize: 12 }}>Run your daily Chartink scans after market close</div>
+      </div>
+    )
+  }
+
+  if (!marketOpen) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-3)' }}>
+        <div style={{ fontSize: 28, marginBottom: 10 }}>🌙</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 13, marginBottom: 6 }}>Market closed</div>
+        <div style={{ fontSize: 12 }}>Opens at 09:15 IST on weekdays</div>
+      </div>
+    )
+  }
+
+  if (!inWindow) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-3)' }}>
+        <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 13, marginBottom: 6 }}>Outside trading window</div>
+        <div style={{ fontSize: 12 }}>Webhooks will be processed during your active windows</div>
+      </div>
+    )
+  }
+
   return (
-    <div style={{
-      background: 'var(--bg-card)',
-      border: '1px solid var(--yellow-dim)',
-      borderLeft: '3px solid var(--yellow)',
-      borderRadius: 8,
-      padding: '12px 16px',
-      animation: 'fadeIn 0.3s ease forwards',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 15,
-            fontWeight: 600,
-            color: 'var(--text-primary)',
-          }}>
-            {stock.symbol}
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-            {stock.entryConditionsMet.length} condition{stock.entryConditionsMet.length !== 1 ? 's' : ''} met
-          </span>
-        </div>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          {formatTime(stock.lastUpdated)}
-        </span>
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
-        {stock.entryConditionsMet.map((c, i) => (
-          <span key={i} style={{
-            fontSize: 11,
-            color: 'var(--yellow)',
-            background: 'var(--yellow-dim)',
-            borderRadius: 4,
-            padding: '2px 7px',
-            fontFamily: 'var(--font-mono)',
-          }}>✓ {c}</span>
-        ))}
-      </div>
-
-      {stock.missingConditions.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-          {stock.missingConditions.map((c, i) => (
-            <span key={i} style={{
-              fontSize: 11,
-              color: 'var(--text-muted)',
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border)',
-              borderRadius: 4,
-              padding: '2px 7px',
-              fontFamily: 'var(--font-mono)',
-            }}>
-              ○ {c}
-            </span>
-          ))}
-        </div>
-      )}
+    <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-3)' }}>
+      <div style={{ fontSize: 28, marginBottom: 10 }}>👁</div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 13, marginBottom: 6 }}>Watching for signals</div>
+      <div style={{ fontSize: 12 }}>Next Chartink webhook will update this list</div>
     </div>
   )
 }
 
-function BlockedRow({ stocks }: { stocks: StockState[] }) {
-  const [expanded, setExpanded] = useState(false)
+// ─── Windows Editor ───────────────────────────────────────────────────────────
 
-  if (stocks.length === 0) return null
+function WindowsEditor({ windows, onSave }: {
+  windows: TradingWindows
+  onSave: (w: TradingWindows) => void
+}) {
+  const [local, setLocal] = useState<TradingWindows>(windows)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
-  return (
+  useEffect(() => { setLocal(windows) }, [windows])
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await fetch('/api/windows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(local),
+      })
+      onSave(local)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const row = (
+    label: string,
+    session: 'morning' | 'afternoon'
+  ) => (
     <div style={{
-      background: 'var(--bg-card)',
-      border: '1px solid var(--red-dim)',
-      borderLeft: '3px solid var(--red)',
-      borderRadius: 8,
-      overflow: 'hidden',
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '10px 0',
+      borderBottom: '1px solid var(--border)',
     }}>
+      {/* Toggle */}
       <button
-        onClick={() => setExpanded(e => !e)}
+        onClick={() => setLocal(p => ({
+          ...p,
+          [session]: { ...p[session], enabled: !p[session].enabled }
+        }))}
         style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '10px 16px',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'var(--red)',
+          width: 36, height: 20, borderRadius: 10,
+          background: local[session].enabled ? 'var(--green)' : 'var(--border-lit)',
+          border: 'none', position: 'relative', flexShrink: 0,
+          transition: 'background 0.2s',
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 500, fontFamily: 'var(--font-mono)' }}>
-          🔴 BLOCKED ({stocks.length})
-        </span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          {expanded ? '▲ hide' : '▼ show'}
-        </span>
+        <span style={{
+          position: 'absolute', top: 2,
+          left: local[session].enabled ? 18 : 2,
+          width: 16, height: 16, borderRadius: '50%',
+          background: 'white', transition: 'left 0.2s',
+        }} />
       </button>
 
-      {expanded && (
-        <div style={{ padding: '0 16px 12px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {stocks.map(s => (
-            <span key={s.symbol} style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 12,
-              color: 'var(--red)',
-              background: 'var(--red-dim)',
-              borderRadius: 4,
-              padding: '3px 8px',
-            }}>
-              {s.symbol}
-              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>
-                {s.entryConditionsMet.join(', ')}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
+      <span style={{ fontSize: 13, color: 'var(--text-2)', width: 80 }}>{label}</span>
+
+      <input
+        type="time"
+        value={local[session].start}
+        onChange={e => setLocal(p => ({ ...p, [session]: { ...p[session], start: e.target.value } }))}
+        disabled={!local[session].enabled}
+        style={{ opacity: local[session].enabled ? 1 : 0.4 }}
+      />
+      <span style={{ color: 'var(--text-3)', fontSize: 12 }}>to</span>
+      <input
+        type="time"
+        value={local[session].end}
+        onChange={e => setLocal(p => ({ ...p, [session]: { ...p[session], end: e.target.value } }))}
+        disabled={!local[session].enabled}
+        style={{ opacity: local[session].enabled ? 1 : 0.4 }}
+      />
     </div>
   )
-}
 
-function EmptyState({ marketOpen }: { marketOpen: boolean }) {
   return (
     <div style={{
-      textAlign: 'center',
-      padding: '48px 24px',
-      color: 'var(--text-muted)',
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      padding: '14px 16px',
+      marginTop: 24,
     }}>
-      <div style={{ fontSize: 32, marginBottom: 12 }}>
-        {marketOpen ? '⌛' : '🌙'}
+      <div style={{
+        fontSize: 11, fontWeight: 600, color: 'var(--text-2)',
+        letterSpacing: '0.1em', marginBottom: 12,
+        fontFamily: 'var(--mono)',
+      }}>
+        ⚙ TRADING WINDOWS (IST)
       </div>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, marginBottom: 6 }}>
-        {marketOpen ? 'Waiting for signals' : 'Market closed'}
-      </div>
-      <div style={{ fontSize: 12 }}>
-        {marketOpen
-          ? 'Chartink scans will push signals here when conditions are met'
-          : 'Market opens at 09:15 IST on weekdays'}
+
+      {row('Morning', 'morning')}
+      {row('Afternoon', 'afternoon')}
+
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            background: 'var(--blue)', color: 'white',
+            border: 'none', borderRadius: 6,
+            padding: '7px 18px', fontSize: 13, fontWeight: 500,
+          }}
+        >
+          {saving ? 'Saving...' : 'Save Windows'}
+        </button>
+        {saved && (
+          <span style={{ fontSize: 12, color: 'var(--green)', fontFamily: 'var(--mono)' }}>
+            ✓ Saved
+          </span>
+        )}
       </div>
     </div>
   )
 }
 
-// ─── Main Dashboard ──────────────────────────────────────────────────────────
+// ─── Webhook URLs Reference ───────────────────────────────────────────────────
+
+function WebhookRef() {
+  const base = typeof window !== 'undefined' ? window.location.origin : 'https://your-app.vercel.app'
+
+  const urls = [
+    { scan: 'VWAP_BREAKOUT',     label: 'Intraday — VWAP Breakout + RSI spike' },
+    { scan: 'EMA_PULLBACK',      label: 'Intraday — EMA Pullback (10/20 EMA touch)' },
+    { scan: 'MOMENTUM_BREAKOUT', label: 'Delivery — Daily Momentum Breakout' },
+    { scan: 'TREND_PULLBACK',    label: 'Delivery — Daily Trend Continuation Pullback' },
+  ]
+
+  return (
+    <div style={{
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      padding: '14px 16px',
+      marginTop: 16,
+    }}>
+      <div style={{
+        fontSize: 11, fontWeight: 600, color: 'var(--text-2)',
+        letterSpacing: '0.1em', marginBottom: 12,
+        fontFamily: 'var(--mono)',
+      }}>
+        CHARTINK WEBHOOK URLS
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {urls.map(({ scan, label }) => (
+          <div key={scan}>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 3 }}>{label}</div>
+            <code style={{
+              fontSize: 11, color: 'var(--blue)',
+              fontFamily: 'var(--mono)', wordBreak: 'break-all',
+            }}>
+              {base}/api/webhook?scan={scan}&secret=YOUR_SECRET
+            </code>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [lastPoll, setLastPoll] = useState<Date | null>(null)
-  const [pollInterval, setPollInterval] = useState<number>(POLLING.IDLE)
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const [data, setData]         = useState<DashboardData | null>(null)
+  const [tab, setTab]           = useState<'intraday' | 'delivery'>('intraday')
+  const [showSettings, setShowSettings] = useState(false)
+  const [error, setError]       = useState<string | null>(null)
+  const [pollMs, setPollMs]     = useState<number>(POLLING.IDLE)
+  const timeoutRef              = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const fetchSignals = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
       const res = await fetch('/api/signals', { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json: DashboardData = await res.json()
       setData(json)
       setError(null)
-      setLastPoll(new Date())
 
-      // Smart polling — adjust interval based on active signals and market state
-      if (!json.marketOpen) {
-        setPollInterval(POLLING.CLOSED)
-      } else if (json.entrySignals.length > 0) {
-        setPollInterval(POLLING.ACTIVE)  // 10 seconds when signals present
-      } else {
-        setPollInterval(POLLING.IDLE)    // 30 seconds when quiet
-      }
-    } catch (err) {
-      setError('Unable to reach server. Retrying...')
+      // Smart polling
+      const hasActiveIntraday = json.intraday.length > 0
+      if (!json.marketOpen) setPollMs(POLLING.CLOSED)
+      else if (hasActiveIntraday) setPollMs(POLLING.ACTIVE)
+      else setPollMs(POLLING.IDLE)
+    } catch (e) {
+      setError('Connection error — retrying')
     }
   }, [])
 
-  // Smart polling loop
   useEffect(() => {
-    fetchSignals()
-
+    fetchData()
     const schedule = () => {
       timeoutRef.current = setTimeout(() => {
-        fetchSignals().then(schedule)
-      }, pollInterval)
+        fetchData().then(schedule)
+      }, pollMs)
     }
-
     schedule()
+    return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current) }
+  }, [fetchData, pollMs])
 
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    }
-  }, [fetchSignals, pollInterval])
+  const signals = tab === 'intraday' ? data?.intraday ?? [] : data?.delivery ?? []
+  const intradayCount = data?.intraday.length ?? 0
+  const deliveryCount = data?.delivery.length ?? 0
 
-  const hasAnyData = data && (
-    data.entrySignals.length > 0 ||
-    data.watchlist.length > 0 ||
-    data.blocked.length > 0
-  )
+  // Window status indicator
+  const windowStatus = () => {
+    if (!data) return null
+    if (!data.marketOpen) return { label: 'Market Closed', color: 'var(--text-3)' }
+    if (data.inActiveWindow) return { label: 'Window Active', color: 'var(--green)' }
+    return { label: 'Outside Window', color: 'var(--yellow)' }
+  }
+  const ws = windowStatus()
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'var(--bg-primary)',
-      padding: '0',
-    }}>
-      {/* Header */}
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+
+      {/* ── Header ── */}
       <header style={{
-        background: 'var(--bg-secondary)',
+        background: 'var(--bg-card)',
         borderBottom: '1px solid var(--border)',
-        padding: '14px 20px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
+        padding: '12px 20px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        position: 'sticky', top: 0, zIndex: 10,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <LiveDot color={data?.marketOpen ? 'var(--green)' : 'var(--text-muted)'} />
-          <span style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 14,
-            fontWeight: 600,
-            color: 'var(--text-primary)',
-            letterSpacing: '0.08em',
-          }}>
-            INTRADAY SIGNALS
+          <span className="pulse" style={{
+            display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+            background: data?.marketOpen ? 'var(--green)' : 'var(--text-3)',
+          }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600, letterSpacing: '0.06em' }}>
+            TRADING SIGNALS
           </span>
-          <span style={{
-            fontSize: 11,
-            color: data?.marketOpen ? 'var(--green)' : 'var(--text-muted)',
-            fontFamily: 'var(--font-mono)',
-          }}>
-            {data?.marketOpen ? 'MARKET OPEN' : 'MARKET CLOSED'}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {data && (
-            <span style={{
-              fontSize: 11,
-              color: 'var(--text-muted)',
-              fontFamily: 'var(--font-mono)',
-            }}>
-              {data.entrySignals.length > 0
-                ? `Polling every ${POLLING.ACTIVE / 1000}s`
-                : `Polling every ${data.marketOpen ? POLLING.IDLE / 1000 : POLLING.CLOSED / 1000}s`
-              }
+          {ws && (
+            <span style={{ fontSize: 11, color: ws.color, fontFamily: 'var(--mono)' }}>
+              {ws.label}
             </span>
           )}
-          {lastPoll && (
-            <span style={{
-              fontSize: 11,
-              color: 'var(--text-muted)',
-              fontFamily: 'var(--font-mono)',
-            }}>
-              {formatTime(lastPoll.toISOString())}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {data && (
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
+              {data.currentTimeIST} IST
             </span>
           )}
           {error && (
-            <span style={{ fontSize: 11, color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>
-              ⚠ {error}
-            </span>
+            <span style={{ fontSize: 11, color: 'var(--red)', fontFamily: 'var(--mono)' }}>⚠ {error}</span>
           )}
+          <button
+            onClick={() => setShowSettings(s => !s)}
+            style={{
+              background: showSettings ? 'var(--border-lit)' : 'transparent',
+              border: '1px solid var(--border)',
+              borderRadius: 6, color: 'var(--text-2)',
+              padding: '5px 10px', fontSize: 13,
+            }}
+          >
+            ⚙
+          </button>
         </div>
       </header>
 
-      {/* Main content */}
-      <main style={{ maxWidth: 900, margin: '0 auto', padding: '20px 16px' }}>
+      {/* ── Main ── */}
+      <main style={{ maxWidth: 860, margin: '0 auto', padding: '20px 16px' }}>
 
-        {!data ? (
-          <div style={{ textAlign: 'center', padding: '80px 0', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            Loading...
-          </div>
-        ) : !hasAnyData ? (
-          <EmptyState marketOpen={data.marketOpen} />
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-
-            {/* Entry Signals */}
-            <section>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                marginBottom: 12,
-              }}>
-                <span style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'var(--green)',
-                  letterSpacing: '0.1em',
-                }}>
-                  🟢 ENTRY SIGNALS
-                </span>
-                {data.entrySignals.length > 0 && (
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
+          {(['intraday', 'delivery'] as const).map(t => {
+            const count = t === 'intraday' ? intradayCount : deliveryCount
+            const active = tab === t
+            return (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                style={{
+                  background: active ? 'var(--bg-card)' : 'transparent',
+                  border: `1px solid ${active ? 'var(--border-lit)' : 'var(--border)'}`,
+                  borderRadius: 7, color: active ? 'var(--text)' : 'var(--text-2)',
+                  padding: '8px 18px', fontSize: 13, fontWeight: active ? 500 : 400,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                {t === 'intraday' ? 'Intraday' : 'Delivery'}
+                {count > 0 && (
                   <span style={{
-                    fontSize: 11,
-                    color: 'var(--green)',
-                    background: 'var(--green-dim)',
-                    borderRadius: 10,
-                    padding: '1px 8px',
-                    fontFamily: 'var(--font-mono)',
+                    fontSize: 11, fontFamily: 'var(--mono)',
+                    background: t === 'intraday' ? 'var(--blue-bg)' : 'var(--green-bg)',
+                    color: t === 'intraday' ? 'var(--blue)' : 'var(--green)',
+                    borderRadius: 8, padding: '1px 7px',
                   }}>
-                    {data.entrySignals.length}
+                    {count}
                   </span>
                 )}
-              </div>
+              </button>
+            )
+          })}
+        </div>
 
-              {data.entrySignals.length === 0 ? (
-                <div style={{
-                  padding: '20px 16px',
-                  background: 'var(--bg-card)',
-                  borderRadius: 8,
-                  border: '1px solid var(--border)',
-                  color: 'var(--text-muted)',
-                  fontSize: 13,
-                  fontFamily: 'var(--font-mono)',
-                }}>
-                  No entry signals yet — watching for confluence
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {data.entrySignals.map(stock => (
-                    <EntryCard key={stock.symbol} stock={stock} />
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* Watchlist */}
-            {data.watchlist.length > 0 && (
-              <section>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  marginBottom: 12,
-                }}>
-                  <span style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: 'var(--yellow)',
-                    letterSpacing: '0.1em',
-                  }}>
-                    🟡 WATCHLIST
-                  </span>
-                  <span style={{
-                    fontSize: 11,
-                    color: 'var(--yellow)',
-                    background: 'var(--yellow-dim)',
-                    borderRadius: 10,
-                    padding: '1px 8px',
-                    fontFamily: 'var(--font-mono)',
-                  }}>
-                    {data.watchlist.length}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {data.watchlist.map(stock => (
-                    <WatchlistCard key={stock.symbol} stock={stock} />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Blocked — collapsed by default */}
-            {data.blocked.length > 0 && (
-              <section>
-                <BlockedRow stocks={data.blocked} />
-              </section>
-            )}
-
+        {/* Signal list */}
+        {!data ? (
+          <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
+            Loading...
           </div>
-        )}
-      </main>
-
-      {/* Footer — webhook URLs reference */}
-      <footer style={{
-        borderTop: '1px solid var(--border)',
-        padding: '16px 20px',
-        marginTop: 40,
-        maxWidth: 900,
-        margin: '40px auto 0',
-      }}>
-        <details>
-          <summary style={{
-            cursor: 'pointer',
-            fontSize: 11,
-            color: 'var(--text-muted)',
-            fontFamily: 'var(--font-mono)',
-            userSelect: 'none',
-          }}>
-            ▶ Chartink Webhook URLs
-          </summary>
-          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {[
-              ['I1', 'MACD below histogram (3-min) — BLOCKED'],
-              ['I2', '10 EMA below VWAP (3-min) — BLOCKED'],
-              ['I3', 'Price above VWAP (3-min) — Watchlist'],
-              ['I4', 'MACD above histogram (5-min) — Watchlist'],
-              ['I5', 'RSI above 70 (1-min) — Entry Trigger'],
-              ['I6', '10 EMA above 20 EMA (5-min) — Watchlist'],
-              ['I7A', 'Price near 10 EMA (3-min) — Pullback'],
-              ['I7B', 'Price near 20 EMA (3-min) — Pullback'],
-              ['I8', 'RSI 45-60 (3-min) — Entry Trigger'],
-            ].map(([id, label]) => (
-              <div key={id} style={{ display: 'flex', gap: 12, alignItems: 'baseline' }}>
-                <code style={{
-                  fontSize: 11,
-                  color: 'var(--blue)',
-                  fontFamily: 'var(--font-mono)',
-                  minWidth: 320,
-                  wordBreak: 'break-all',
-                }}>
-                  /api/webhook?scan={id}
-                </code>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
-              </div>
+        ) : signals.length === 0 ? (
+          <EmptyState
+            tab={tab}
+            marketOpen={data.marketOpen}
+            inWindow={data.inActiveWindow}
+          />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {signals.map(s => (
+              <SignalCard key={`${s.scanId}-${s.symbol}`} signal={s} />
             ))}
           </div>
-        </details>
-      </footer>
+        )}
+
+        {/* Settings panel */}
+        {showSettings && data && (
+          <>
+            <WindowsEditor
+              windows={data.windows}
+              onSave={(w) => setData(d => d ? { ...d, windows: w } : d)}
+            />
+            <WebhookRef />
+          </>
+        )}
+
+      </main>
     </div>
   )
 }
