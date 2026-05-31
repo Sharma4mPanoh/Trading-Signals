@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg-primary: #0a0e14;
+  --bg-secondary: #0f1520;
+  --bg-card: #121a27;
+  --bg-card-hover: #162030;
+  --border: #1e2d42;
+  --border-bright: #2a4060;
+
+  --text-primary: #e8f0fe;
+  --text-secondary: #7a9cc0;
+  --text-muted: #3d5a7a;
+  --text-mono: #a8c4e0;
+
+  --green: #00d97e;
+  --green-dim: #004d2a;
+  --green-glow: rgba(0, 217, 126, 0.15);
+
+  --yellow: #f5c518;
+  --yellow-dim: #3d2f00;
+  --yellow-glow: rgba(245, 197, 24, 0.12);
+
+  --red: #ff4d4d;
+  --red-dim: #3d0000;
+  --red-glow: rgba(255, 77, 77, 0.12);
+
+  --blue: #4d9fff;
+  --blue-dim: #0a2040;
+
+  --font-sans: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+
+/* Pulse animation for live indicators */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-pulse { animation: pulse 2s ease-in-out infinite; }
+.animate-fade { animation: fadeIn 0.3s ease forwards; }
+.animate-slide { animation: slideIn 0.25s ease forwards; }
