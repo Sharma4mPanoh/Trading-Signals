@@ -283,7 +283,7 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastPoll, setLastPoll] = useState<Date | null>(null)
-  const [pollInterval, setPollInterval] = useState(POLLING.IDLE)
+  const [pollInterval, setPollInterval] = useState<number>(POLLING.IDLE)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const fetchSignals = useCallback(async () => {
