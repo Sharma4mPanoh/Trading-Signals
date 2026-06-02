@@ -1,36 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { saveWindows, getWindows } from '@/lib/logic'
-import type { TradingWindows } from '@/lib/types'
+import { redis } from '@/lib/redis'
+import { DEFAULT_TRADING_WINDOWS } from '@/lib/constants'
 
 export async function GET() {
-  try {
-    const windows = await getWindows()
-    return NextResponse.json(windows)
-  } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 })
-  }
+  const windows = await redis.get('trading:windows') ?? DEFAULT_TRADING_WINDOWS
+  return NextResponse.json({ windows })
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const body: TradingWindows = await request.json()
-
-    // Basic validation
-    const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/
-
-    if (!timeRegex.test(body.morning?.start) ||
-        !timeRegex.test(body.morning?.end) ||
-        !timeRegex.test(body.afternoon?.start) ||
-        !timeRegex.test(body.afternoon?.end)) {
-      return NextResponse.json(
-        { error: 'Invalid time format. Use HH:MM (e.g. 09:30)' },
-        { status: 400 }
-      )
-    }
-
-    await saveWindows(body)
-    return NextResponse.json({ success: true, windows: body })
-  } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 })
-  }
+export async function POST(req: NextRequest) {
+  const { windows } = await req.json()
+  await redis.set('trading:windows', JSON.stringify(windows))
+  return NextResponse.json({ success: true })
 }

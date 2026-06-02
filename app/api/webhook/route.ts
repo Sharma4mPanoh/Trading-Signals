@@ -1,83 +1,92 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { processWebhook } from '@/lib/logic'
-import { ALL_SCAN_IDS } from '@/lib/constants'
+import { redis } from '@/lib/redis'
+import { INTRADAY_SCANS, DELIVERY_SCANS, INTRADAY_TTL, DELIVERY_TTL, ARCHIVE_MAX, SCAN_TRAIL_METHOD, SCAN_DESCRIPTIONS } from '@/lib/constants'
+import { isInTradingWindow } from '@/lib/time'
+import type { TradingWindow } from '@/lib/types'
 
-export async function POST(request: NextRequest) {
+const SECRET = process.env.WEBHOOK_SECRET
+
+function isIntraday(scanId: string) { return scanId in INTRADAY_SCANS }
+function isDelivery(scanId: string) { return scanId in DELIVERY_SCANS }
+
+export async function GET(req: NextRequest) {
+  return handleWebhook(req)
+}
+export async function POST(req: NextRequest) {
+  return handleWebhook(req)
+}
+
+async function handleWebhook(req: NextRequest) {
   try {
-    // Validate secret
-    const secret = process.env.WEBHOOK_SECRET
-    if (secret) {
-      const incoming = request.nextUrl.searchParams.get('secret')
-      if (incoming !== secret) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-      }
+    const url  = new URL(req.url)
+    const scan = url.searchParams.get('scan')?.toUpperCase()
+    const sec  = url.searchParams.get('secret')
+
+    if (SECRET && sec !== SECRET) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    if (!scan || (!isIntraday(scan) && !isDelivery(scan))) {
+      return NextResponse.json({ error: 'Unknown scan ID' }, { status: 400 })
     }
 
-    // Get scan ID
-    const scanId = request.nextUrl.searchParams.get('scan')?.toUpperCase()
-    if (!scanId || !ALL_SCAN_IDS.includes(scanId as any)) {
-      return NextResponse.json(
-        { error: `Invalid scan. Must be one of: ${ALL_SCAN_IDS.join(', ')}` },
-        { status: 400 }
-      )
-    }
-
-    // Parse symbols from body
+    // Parse symbols from POST body or query param
     let symbols: string[] = []
-    const contentType = request.headers.get('content-type') || ''
-
-    if (contentType.includes('application/json')) {
-      const body = await request.json()
-      symbols = parseSymbols(body.stocks || body.symbols || body.data || '')
-    } else if (contentType.includes('application/x-www-form-urlencoded')) {
-      const form = await request.formData()
-      symbols = parseSymbols(form.get('stocks')?.toString() || form.get('symbols')?.toString() || '')
+    const symParam = url.searchParams.get('symbols')
+    if (symParam) {
+      symbols = symParam.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
     } else {
-      symbols = parseSymbols(await request.text())
+      try {
+        const body = await req.json()
+        if (body?.stocks)  symbols = String(body.stocks).split(',').map((s: string) => s.trim().toUpperCase()).filter(Boolean)
+        if (body?.symbols) symbols = String(body.symbols).split(',').map((s: string) => s.trim().toUpperCase()).filter(Boolean)
+      } catch { /* GET request or empty body */ }
     }
 
     if (symbols.length === 0) {
-      return NextResponse.json({ message: 'No symbols in payload', scanId }, { status: 200 })
+      return NextResponse.json({ error: 'No symbols provided' }, { status: 400 })
     }
 
-    const result = await processWebhook(scanId, symbols)
+    const intraday = isIntraday(scan)
+    const module_  = intraday ? 'INTRADAY' : 'DELIVERY'
+    const ttl      = intraday ? INTRADAY_TTL : DELIVERY_TTL
 
-    return NextResponse.json({
-      success: true,
-      scanId,
-      ...result,
-      timestamp: new Date().toISOString(),
-    })
+    // For intraday: check trading window
+    let skipped = 0
+    if (intraday) {
+      const rawWindows = await redis.get<TradingWindow[]>('trading:windows')
+      const windows = rawWindows ?? [
+        { start: '09:30', end: '11:00', enabled: true,  label: 'Morning session' },
+        { start: '13:00', end: '14:45', enabled: true,  label: 'Afternoon session' },
+      ]
+      if (!isInTradingWindow(windows)) {
+        return NextResponse.json({ success: true, scanId: scan, processed: 0, skipped: symbols.length, reason: 'Outside trading window' })
+      }
+    }
 
-  } catch (error) {
-    console.error('Webhook error:', error)
-    return NextResponse.json({ error: String(error) }, { status: 500 })
+    const now = new Date().toISOString()
+    let processed = 0
+
+    for (const symbol of symbols) {
+      const key = `signal:${module_}:${symbol}`
+      const signal = {
+        symbol,
+        scanId:     scan,
+        module:     module_,
+        receivedAt: now,
+        signalAgeMinutes: 0,
+        description: SCAN_DESCRIPTIONS[scan] ?? '',
+        trailMethod: SCAN_TRAIL_METHOD[scan] ?? 'EMA_20',
+        entryPrice:  null,
+        stopLoss:    null,
+        targetPrice: null,
+      }
+      await redis.set(key, JSON.stringify(signal), { ex: ttl })
+      processed++
+    }
+
+    return NextResponse.json({ success: true, scanId: scan, processed, skipped })
+  } catch (err) {
+    console.error('Webhook error:', err)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
-}
-
-// GET for browser testing
-export async function GET(request: NextRequest) {
-  const scanId = request.nextUrl.searchParams.get('scan')?.toUpperCase()
-  const symbolsParam = request.nextUrl.searchParams.get('symbols') || 'RELIANCE,HDFCBANK'
-
-  if (!scanId) {
-    return NextResponse.json({
-      message: 'Webhook endpoint active',
-      availableScans: ALL_SCAN_IDS,
-      testUrl: '/api/webhook?scan=VWAP_BREAKOUT&symbols=RELIANCE,TCS&secret=YOUR_SECRET',
-    })
-  }
-
-  const symbols = parseSymbols(symbolsParam)
-  const result = await processWebhook(scanId, symbols, true) // skip window check for testing
-
-  return NextResponse.json({ success: true, scanId, symbols, ...result })
-}
-
-function parseSymbols(input: string): string[] {
-  if (!input) return []
-  return input
-    .split(/[,\n\s]+/)
-    .map(s => s.trim().toUpperCase())
-    .filter(s => s.length > 0 && s.length <= 20)
 }

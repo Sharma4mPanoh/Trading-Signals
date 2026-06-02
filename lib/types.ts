@@ -1,33 +1,40 @@
-export type SignalModule = 'INTRADAY' | 'DELIVERY'
-export type SignalPath = 'VWAP_BREAKOUT' | 'EMA_PULLBACK' | 'MOMENTUM_BREAKOUT' | 'TREND_PULLBACK'
-
 export interface Signal {
   symbol: string
-  scanId: SignalPath
-  module: SignalModule
-  description: string
-  receivedAt: string   // ISO timestamp
-  expiresAt: string    // ISO timestamp
+  scanId: string
+  module: 'INTRADAY' | 'DELIVERY'
+  receivedAt: string        // ISO string
   signalAgeMinutes: number
+  description: string
+  // Manual price fields — set by user on the card
+  entryPrice?: number | null
+  stopLoss?: number | null
+  targetPrice?: number | null
+  // Trade regime derived from scanId
+  trailMethod: 'EMA_9' | 'EMA_20'
 }
 
 export interface TradingWindow {
-  start: string   // HH:MM in IST
-  end: string     // HH:MM in IST
+  start: string   // "09:30"
+  end: string     // "11:00"
   enabled: boolean
+  label: string
 }
 
-export interface TradingWindows {
-  morning: TradingWindow
-  afternoon: TradingWindow
-}
-
-export interface DashboardData {
+export interface SignalsResponse {
   intraday: Signal[]
   delivery: Signal[]
-  windows: TradingWindows
   marketOpen: boolean
   inActiveWindow: boolean
-  currentTimeIST: string
-  lastRefresh: string
+  lastRefreshed: string
+  windows: TradingWindow[]
+}
+
+export type SessionRegime = 'POWER_HOUR' | 'GRAVEYARD' | 'SECOND_WIND' | 'CLOSED'
+
+export interface SessionInfo {
+  regime: SessionRegime
+  label: string
+  timeRange: string
+  instruction: string
+  color: string
 }

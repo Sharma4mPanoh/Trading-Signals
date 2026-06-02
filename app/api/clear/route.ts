@@ -1,22 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { clearAllSignals } from '@/lib/logic'
+import { redis } from '@/lib/redis'
 
-export async function POST(request: NextRequest) {
-  try {
-    const secret = process.env.WEBHOOK_SECRET
-    if (secret) {
-      const incoming = request.nextUrl.searchParams.get('secret')
-      if (incoming !== secret) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-      }
-    }
-    const cleared = await clearAllSignals()
-    return NextResponse.json({ success: true, cleared, timestamp: new Date().toISOString() })
-  } catch (error) {
-    return NextResponse.json({ error: String(error) }, { status: 500 })
+const SECRET = process.env.WEBHOOK_SECRET
+
+export async function POST(req: NextRequest) {
+  const url = new URL(req.url)
+  const sec = url.searchParams.get('secret')
+  if (SECRET && sec !== SECRET) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-}
-
-export async function GET() {
-  return NextResponse.json({ message: 'Use POST /api/clear?secret=YOUR_SECRET to clear all signals' })
+  const keys = await redis.keys('signal:*')
+  if (keys.length > 0) await Promise.all(keys.map(k => redis.del(k)))
+  return NextResponse.json({ success: true, cleared: keys.length })
 }

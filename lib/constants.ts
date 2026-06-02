@@ -1,40 +1,17 @@
-// ─── Scan IDs ────────────────────────────────────────────────────────────────
+export const INTRADAY_SCANS: Record<string, string> = {
+  VWAP_BREAKOUT: 'VWAP_BREAKOUT',
+  EMA_PULLBACK:  'EMA_PULLBACK',
+}
 
-export const INTRADAY_SCANS = {
-  VWAP_BREAKOUT: 'VWAP_BREAKOUT', // RSI > 70 + Price above VWAP + MACD bullish
-  EMA_PULLBACK:  'EMA_PULLBACK',  // 10/20 EMA touch + MACD + RSI 45-65
-} as const
-
-export const DELIVERY_SCANS = {
-  MOMENTUM_BREAKOUT: 'MOMENTUM_BREAKOUT', // Price > 20 EMA + MACD cross + RSI 55-68
-  TREND_PULLBACK:    'TREND_PULLBACK',    // Price near 20 EMA + EMAs stacked + RSI 45-60
-} as const
+export const DELIVERY_SCANS: Record<string, string> = {
+  MOMENTUM_BREAKOUT: 'MOMENTUM_BREAKOUT',
+  TREND_PULLBACK:    'TREND_PULLBACK',
+}
 
 export const ALL_SCAN_IDS = [
   ...Object.values(INTRADAY_SCANS),
   ...Object.values(DELIVERY_SCANS),
 ]
-
-export type IntradayScanId = keyof typeof INTRADAY_SCANS
-export type DeliveryScanId = keyof typeof DELIVERY_SCANS
-export type ScanId = IntradayScanId | DeliveryScanId
-
-// ─── TTL Values (seconds) ────────────────────────────────────────────────────
-
-export const TTL = {
-  INTRADAY_SIGNAL: 75 * 60,   // 75 minutes — outlasts 60-min webhook cycle
-  DELIVERY_SIGNAL: 28 * 3600, // 28 hours — persists through next trading day
-} as const
-
-// ─── Polling Intervals (milliseconds) ────────────────────────────────────────
-
-export const POLLING = {
-  ACTIVE:  10000, // 10 seconds — entry signals present
-  IDLE:    30000, // 30 seconds — no active signals
-  CLOSED:  60000, // 60 seconds — market closed
-} as const
-
-// ─── Scan Labels ─────────────────────────────────────────────────────────────
 
 export const SCAN_LABELS: Record<string, string> = {
   VWAP_BREAKOUT:     'VWAP Breakout',
@@ -43,18 +20,50 @@ export const SCAN_LABELS: Record<string, string> = {
   TREND_PULLBACK:    'Trend Pullback',
 }
 
-// ─── Scan Descriptions ───────────────────────────────────────────────────────
-
 export const SCAN_DESCRIPTIONS: Record<string, string> = {
-  VWAP_BREAKOUT:     'RSI > 70 (1-min) · Price above VWAP (3-min) · MACD bullish (5-min)',
-  EMA_PULLBACK:      'Near 10/20 EMA (5-min) · MACD bullish (5-min) · RSI 45-65 (5-min)',
-  MOMENTUM_BREAKOUT: 'Price > 20 EMA · MACD cross · RSI 55-68 · Volume confirmed',
-  TREND_PULLBACK:    'EMAs stacked · Price near 20 EMA · RSI 45-60 · MACD > 0',
+  VWAP_BREAKOUT:     'RSI > 70 · Price above VWAP · MACD bullish crossover',
+  EMA_PULLBACK:      '10/20 EMA touch · MACD signal · RSI 45–65 range',
+  MOMENTUM_BREAKOUT: 'Price > 20 EMA · MACD cross · RSI 55–68 zone',
+  TREND_PULLBACK:    'Price near 20 EMA · EMAs stacked · RSI 45–60 zone',
 }
 
-// ─── Default Trading Windows (IST) ───────────────────────────────────────────
+// Trail method by scan type — per the trading framework
+// VWAP breakout → trail 9 EMA close
+// EMA pullback  → trail 20 EMA close
+export const SCAN_TRAIL_METHOD: Record<string, 'EMA_9' | 'EMA_20'> = {
+  VWAP_BREAKOUT:     'EMA_9',
+  EMA_PULLBACK:      'EMA_20',
+  MOMENTUM_BREAKOUT: 'EMA_20',
+  TREND_PULLBACK:    'EMA_20',
+}
 
-export const DEFAULT_WINDOWS = {
-  morning: { start: '09:30', end: '11:00', enabled: true },
-  afternoon: { start: '13:00', end: '14:45', enabled: true },
-} as const
+export const SCAN_COLORS: Record<string, string> = {
+  VWAP_BREAKOUT:     '#3d8ef0',
+  EMA_PULLBACK:      '#a78bfa',
+  MOMENTUM_BREAKOUT: '#00cc88',
+  TREND_PULLBACK:    '#f0b429',
+}
+
+// TTL in seconds
+export const INTRADAY_TTL = 75 * 60   // 75 minutes
+export const DELIVERY_TTL = 28 * 3600 // 28 hours
+
+// Polling intervals in ms
+export const POLL_ACTIVE  = 10_000
+export const POLL_IDLE    = 30_000
+export const POLL_CLOSED  = 60_000
+
+// Session regime windows (IST, 24h)
+export const SESSION_WINDOWS = {
+  POWER_HOUR:  { start: '09:15', end: '11:00' },
+  GRAVEYARD:   { start: '11:00', end: '13:00' },
+  SECOND_WIND: { start: '13:00', end: '14:45' },
+}
+
+export const DEFAULT_TRADING_WINDOWS = [
+  { start: '09:30', end: '11:00', enabled: true,  label: 'Morning session' },
+  { start: '13:00', end: '14:45', enabled: true,  label: 'Afternoon session' },
+]
+
+// Max archived signals to keep
+export const ARCHIVE_MAX = 500
