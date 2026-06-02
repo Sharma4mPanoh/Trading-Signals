@@ -29,6 +29,11 @@ export interface SignalsResponse {
   windows: TradingWindow[]
 }
 
+export interface ArchivedSignal extends Signal {
+  archivedAt: string   // ISO string — when it was archived
+  outcome?: 'target_hit' | 'sl_hit' | 'expired' | null
+}
+
 export type SessionRegime = 'POWER_HOUR' | 'GRAVEYARD' | 'SECOND_WIND' | 'CLOSED'
 
 export interface SessionInfo {

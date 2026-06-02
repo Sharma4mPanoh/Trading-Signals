@@ -68,6 +68,18 @@ async function handleWebhook(req: NextRequest) {
 
     for (const symbol of symbols) {
       const key = `signal:${module_}:${symbol}`
+
+      // Archive existing signal before overwriting
+      try {
+        const existing = await redis.get<string>(key)
+        if (existing) {
+          const old = typeof existing === 'string' ? JSON.parse(existing) : existing
+          const archived = { ...old, archivedAt: now, outcome: null }
+          await redis.lpush('signal:archive', JSON.stringify(archived))
+          await redis.ltrim('signal:archive', 0, ARCHIVE_MAX - 1)
+        }
+      } catch { /* archive failure should not block new signal */ }
+
       const signal = {
         symbol,
         scanId:     scan,

@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { Signal, SignalsResponse, TradingWindow, SessionRegime } from '@/lib/types'
+import type { Signal, SignalsResponse, TradingWindow, SessionRegime, ArchivedSignal } from '@/lib/types'
 import { SCAN_LABELS, SCAN_COLORS, SCAN_TRAIL_METHOD, POLL_ACTIVE, POLL_IDLE, POLL_CLOSED } from '@/lib/constants'
 
 // ─── Session regime helpers (client-side) ────────────────────────────────────
@@ -387,6 +387,134 @@ function WindowsEditor({ windows, onSave }: {
   )
 }
 
+// ─── About modal ──────────────────────────────────────────────────────────────
+
+function AboutModal() {
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: 16, marginTop: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', marginBottom: 12, fontFamily: 'var(--mono)' }}>
+        ABOUT THIS DASHBOARD
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.8, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div>
+          <span style={{ color: 'var(--text)', fontWeight: 500 }}>How signals are generated</span><br />
+          Rule-based scans running on Chartink fire webhooks to this app when conditions are met. No AI, no discretion — pure technical conditions.
+        </div>
+        <div>
+          <span style={{ color: 'var(--text)', fontWeight: 500 }}>Intraday scans</span><br />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>VWAP Breakout</span> — RSI &gt; 70, price above VWAP, MACD bullish. Trail: 9 EMA close.<br />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>EMA Pullback</span> — Price near 20 EMA, MACD signal, RSI 45–65. Trail: 20 EMA close.
+        </div>
+        <div>
+          <span style={{ color: 'var(--text)', fontWeight: 500 }}>Delivery scans</span><br />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>Momentum Breakout</span> — Price &gt; 20 EMA, MACD cross, RSI 55–68. Daily timeframe.<br />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>Trend Pullback</span> — Price near 20 EMA, EMAs stacked, RSI 45–60. Daily timeframe.
+        </div>
+        <div>
+          <span style={{ color: 'var(--text)', fontWeight: 500 }}>What signals do not include</span><br />
+          Fundamental analysis, news, earnings, or sector events. Always check these before acting.
+        </div>
+        <div>
+          <span style={{ color: 'var(--text)', fontWeight: 500 }}>Data</span><br />
+          NSE stocks via Chartink scans. Intraday signals expire in 75 minutes. Delivery signals expire in 28 hours.
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
+          For personal research only. Not SEBI-registered investment advice.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── History Tab ──────────────────────────────────────────────────────────────
+
+function HistoryTab() {
+  const [entries, setEntries]   = useState<ArchivedSignal[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState(false)
+  const [filter, setFilter]     = useState<'ALL' | 'INTRADAY' | 'DELIVERY'>('ALL')
+
+  useEffect(() => {
+    fetch('/api/history')
+      .then(r => r.json())
+      .then(d => { setEntries(d.entries ?? []); setLoading(false) })
+      .catch(() => { setError(true); setLoading(false) })
+  }, [])
+
+  const filtered = filter === 'ALL' ? entries : entries.filter(e => e.module === filter)
+
+  if (loading) return (
+    <div style={{ textAlign: 'center', padding: '50px 20px', color: 'var(--text-3)', fontFamily: 'var(--mono)', fontSize: 12 }}>
+      Loading history…
+    </div>
+  )
+
+  if (error) return (
+    <div style={{ textAlign: 'center', padding: '50px 20px', color: '#e05252', fontSize: 12 }}>
+      Could not load history
+    </div>
+  )
+
+  return (
+    <div>
+      {/* Filter row */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        {(['ALL', 'INTRADAY', 'DELIVERY'] as const).map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            background: filter === f ? 'var(--bg-card)' : 'transparent',
+            border: `1px solid ${filter === f ? 'var(--border-lit)' : 'var(--border)'}`,
+            borderRadius: 6, color: filter === f ? 'var(--text)' : 'var(--text-3)',
+            padding: '5px 12px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)',
+          }}>
+            {f}
+          </button>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', alignSelf: 'center' }}>
+          {filtered.length} entries
+        </span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-3)', fontFamily: 'var(--mono)', fontSize: 12 }}>
+          No archived signals yet. History builds up as signals expire or are replaced.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {filtered.map((e, i) => {
+            const color = SCAN_COLORS[e.scanId] ?? '#3d8ef0'
+            const label = SCAN_LABELS[e.scanId] ?? e.scanId
+            return (
+              <div key={i} style={{
+                background: 'var(--bg-card)', border: `1px solid ${color}20`,
+                borderLeft: `3px solid ${color}`, borderRadius: 6, padding: '10px 14px',
+                display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+              }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 600, color: 'var(--text)', minWidth: 100 }}>
+                  {e.symbol}
+                </span>
+                <span style={{ fontSize: 11, color, fontFamily: 'var(--mono)', background: `${color}15`, borderRadius: 4, padding: '2px 7px' }}>
+                  {label}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
+                  {new Date(e.archivedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}
+                </span>
+                {e.entryPrice && (
+                  <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--mono)' }}>
+                    E ₹{e.entryPrice} · SL ₹{e.stopLoss ?? '—'} · T ₹{e.targetPrice ?? '—'}
+                  </span>
+                )}
+                <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', marginLeft: 'auto' }}>
+                  {e.module}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Webhook reference ─────────────────────────────────────────────────────────
 
 function WebhookRef() {
@@ -455,7 +583,7 @@ function HeaderBar({ data, regime }: { data: SignalsResponse; regime: SessionReg
 export default function Home() {
   const [data, setData]             = useState<SignalsResponse | null>(null)
   const [error, setError]           = useState<string | null>(null)
-  const [tab, setTab]               = useState<'intraday' | 'delivery'>('intraday')
+  const [tab, setTab]               = useState<'intraday' | 'delivery' | 'history'>('intraday')
   const [showSettings, setShowSettings] = useState(false)
   const [regime, setRegime]         = useState<SessionRegime>('CLOSED')
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -521,7 +649,7 @@ export default function Home() {
     } catch { /* silently ignore */ }
   }
 
-  const signals = tab === 'intraday' ? (data?.intraday ?? []) : (data?.delivery ?? [])
+  const signals = tab === 'intraday' ? (data?.intraday ?? []) : tab === 'delivery' ? (data?.delivery ?? []) : []
   const intradayCount = data?.intraday.length ?? 0
   const deliveryCount = data?.delivery.length ?? 0
 
@@ -634,10 +762,24 @@ export default function Home() {
               </button>
             )
           })}
+          <button
+            onClick={() => setTab('history')}
+            style={{
+              background: tab === 'history' ? 'var(--bg-card)' : 'transparent',
+              border: `1px solid ${tab === 'history' ? 'var(--border-lit)' : 'var(--border)'}`,
+              borderRadius: 7, color: tab === 'history' ? 'var(--text)' : 'var(--text-2)',
+              padding: '8px 18px', fontSize: 13, fontWeight: tab === 'history' ? 500 : 400,
+              cursor: 'pointer',
+            }}
+          >
+            History
+          </button>
         </div>
 
-        {/* Signal list */}
-        {error ? (
+        {/* Signal list / History tab */}
+        {tab === 'history' ? (
+          <HistoryTab />
+        ) : error ? (
           <div style={{ textAlign: 'center', padding: '50px 20px' }}>
             <div style={{ fontSize: 13, color: '#e05252', marginBottom: 8 }}>{error}</div>
             <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
@@ -670,6 +812,7 @@ export default function Home() {
               windows={data.windows}
               onSave={w => setData(d => d ? { ...d, windows: w } : d)}
             />
+            <AboutModal />
             <WebhookRef />
           </>
         )}
