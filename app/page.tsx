@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Signal, SignalsResponse, TradingWindow, SessionRegime, ArchivedSignal } from '@/lib/types'
 import { SCAN_LABELS, SCAN_COLORS, SCAN_TRAIL_METHOD, POLL_ACTIVE, POLL_IDLE, POLL_CLOSED } from '@/lib/constants'
 
+
 // ─── Session regime helpers (client-side) ────────────────────────────────────
 
 function getClientRegime(): SessionRegime {
@@ -578,12 +579,294 @@ function HeaderBar({ data, regime }: { data: SignalsResponse; regime: SessionReg
   )
 }
 
+// ─── Pre-Market Checklist ─────────────────────────────────────────────────────
+
+const GO_NOGO_ITEMS = [
+  { id: 'vix',            label: 'India VIX',                    greenCondition: 'Below 14, or visibly falling',            redCondition: 'Above 18, or spiking sharply' },
+  { id: 'nifty_futures',  label: 'Nifty Pre-Market / Futures',   greenCondition: 'Flat or gap-up, above prior close',        redCondition: 'Gap-down, futures persistently weak' },
+  { id: 'global_cues',    label: 'Global Cues',                  greenCondition: 'SGX Nifty positive, Asia broadly green',   redCondition: 'Major negative events, SGX weak' },
+  { id: 'nifty_trend',    label: 'Nifty Daily Trend',            greenCondition: 'Above 50 EMA, uptrend intact',             redCondition: 'Below 50 EMA or structure broken' },
+  { id: 'ad_expectation', label: 'A/D Ratio Expectation',        greenCondition: 'Broad participation expected',             redCondition: 'Anticipated broad selling / low breadth' },
+]
+
+type ParticipationMode = 'FULL' | 'REDUCED' | 'AVOID' | 'INCOMPLETE'
+
+function getParticipationMode(state: Record<string, boolean | null>): ParticipationMode {
+  const answered = GO_NOGO_ITEMS.filter(i => state[i.id] != null)
+  if (answered.length < GO_NOGO_ITEMS.length) return 'INCOMPLETE'
+  const green = GO_NOGO_ITEMS.filter(i => state[i.id] === true).length
+  if (green >= 4) return 'FULL'
+  if (green === 3) return 'REDUCED'
+  return 'AVOID'
+}
+
+const PARTICIPATION_CONFIG: Record<ParticipationMode, { label: string; sub: string; color: string; bg: string; border: string }> = {
+  FULL:       { label: 'FULL PARTICIPATION',   sub: '4–5 green — conditions favour intraday activity',        color: '#00cc88', bg: '#00cc8812', border: '#00cc8840' },
+  REDUCED:    { label: 'REDUCED SIZE',         sub: '3 green — trade selectively, cut size by 50%',          color: '#f0b429', bg: '#f0b42912', border: '#f0b42940' },
+  AVOID:      { label: 'AVOID INTRADAY',       sub: '≤2 green — sit out or delivery review only',            color: '#e05252', bg: '#e0525212', border: '#e0525240' },
+  INCOMPLETE: { label: 'CHECKLIST INCOMPLETE', sub: 'Complete all 5 checks to get your participation mode',  color: '#5a6070', bg: 'transparent', border: '#1e2230' },
+}
+
+function GoNoGoCard({ item, value, onChange }: {
+  item: typeof GO_NOGO_ITEMS[0]
+  value: boolean | null
+  onChange: (id: string, v: boolean | null) => void
+}) {
+  const isGreen = value === true
+  const isRed   = value === false
+  return (
+    <div style={{
+      background:   isGreen ? '#00cc8808' : isRed ? '#e0525208' : 'var(--bg-card)',
+      border:       `1px solid ${isGreen ? '#00cc8830' : isRed ? '#e0525230' : 'var(--border)'}`,
+      borderLeft:   `3px solid ${isGreen ? '#00cc88' : isRed ? '#e05252' : 'var(--border-lit)'}`,
+      borderRadius: 8,
+      padding:      '12px 14px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{item.label}</span>
+        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+          <button
+            onClick={() => onChange(item.id, isGreen ? null : true)}
+            style={{
+              padding: '3px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+              fontFamily: 'var(--mono)', letterSpacing: '0.04em', cursor: 'pointer',
+              border: `1px solid ${isGreen ? '#00cc88' : '#00cc8830'}`,
+              background: isGreen ? '#00cc8820' : 'transparent',
+              color: isGreen ? '#00cc88' : '#3a4455',
+            }}
+          >GREEN</button>
+          <button
+            onClick={() => onChange(item.id, isRed ? null : false)}
+            style={{
+              padding: '3px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+              fontFamily: 'var(--mono)', letterSpacing: '0.04em', cursor: 'pointer',
+              border: `1px solid ${isRed ? '#e05252' : '#e0525230'}`,
+              background: isRed ? '#e0525220' : 'transparent',
+              color: isRed ? '#e05252' : '#3a4455',
+            }}
+          >RED</button>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 16 }}>
+        <div style={{ flex: 1, display: 'flex', gap: 5, alignItems: 'flex-start' }}>
+          <span style={{ color: '#00cc88', fontSize: 10, marginTop: 2, flexShrink: 0 }}>▲</span>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>{item.greenCondition}</span>
+        </div>
+        <div style={{ flex: 1, display: 'flex', gap: 5, alignItems: 'flex-start' }}>
+          <span style={{ color: '#e05252', fontSize: 10, marginTop: 2, flexShrink: 0 }}>▼</span>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>{item.redCondition}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RuleCard({ title, rules, trailLabel, trailColor }: {
+  title: string; rules: string[]; trailLabel: string; trailColor: string
+}) {
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', fontFamily: 'var(--mono)' }}>{title}</span>
+        <span style={{
+          fontSize: 10, padding: '2px 8px', borderRadius: 4, fontFamily: 'var(--mono)',
+          background: `${trailColor}18`, color: trailColor, border: `1px solid ${trailColor}35`,
+        }}>Trail: {trailLabel}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {rules.map((r, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)', marginTop: 2, flexShrink: 0 }}>·</span>
+            <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55 }}>{r}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function StockSelectionPanel() {
+  return (
+    <div style={{ paddingBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, marginTop: 4 }}>
+        <div style={{ width: 3, height: 14, background: 'var(--blue)', borderRadius: 2 }} />
+        <span style={{ fontSize: 10, fontWeight: 600, fontFamily: 'var(--mono)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'var(--text-2)' }}>Intraday — Entry Criteria</span>
+      </div>
+      <RuleCard title="Path 1 — VWAP Breakout" trailLabel="9 EMA close" trailColor="#00cc88" rules={[
+        'RSI crosses above 70 on 1-min chart',
+        'Price above VWAP on 3-min chart',
+        'MACD bullish on 5-min chart',
+        'Best window: Power Hour (9:15 – 11:00)',
+      ]} />
+      <RuleCard title="Path 2 — EMA Pullback" trailLabel="20 EMA close" trailColor="#a78bfa" rules={[
+        'Price touching 10 or 20 EMA on 5-min chart',
+        'EMAs stacked bullishly at point of touch',
+        'MACD bullish on 5-min chart',
+        'RSI cooled to 45–65 range (not extended)',
+        '50 EMA pullbacks excluded — too risky',
+      ]} />
+      <div style={{ fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)', background: '#e0525210', border: '1px solid #e0525225', borderRadius: 6, padding: '7px 12px', marginBottom: 8 }}>
+        ⚠ Universal exit: loses VWAP + 50 EMA simultaneously → full exit, no trail
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '8px 12px', border: '1px solid var(--border)', lineHeight: 1.7, marginBottom: 16 }}>
+        <span style={{ color: 'var(--text-2)' }}>Session rules:</span> Graveyard (11–1 PM): manage runners only, no new entries. Daily MACD crossover stock → pullback entry on 15-min only. VIX above 17: cut size 50%. VIX above 20: no new entries.
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{ width: 3, height: 14, background: 'var(--green)', borderRadius: 2 }} />
+        <span style={{ fontSize: 10, fontWeight: 600, fontFamily: 'var(--mono)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'var(--text-2)' }}>Delivery — Entry Criteria</span>
+      </div>
+      <RuleCard title="Setup 1 — Momentum Breakout" trailLabel="20 EMA on daily" trailColor="#00cc88" rules={[
+        'EMA stack bullish on daily (short above medium above long)',
+        'MACD bullish on daily chart',
+        'RSI in momentum zone, not overbought',
+        'Volume confirming the move',
+        'Entry in range — not at breakout highs',
+      ]} />
+      <RuleCard title="Setup 2 — Trend Continuation Pullback" trailLabel="20 EMA on daily" trailColor="#00cc88" rules={[
+        'Same EMA stack and MACD conditions as Setup 1',
+        'Stock pulling back within an intact uptrend',
+        'RSI cooled during the pullback (not extended)',
+        'Entry as price stabilises near 20 EMA on daily',
+      ]} />
+      <div style={{ fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)', background: '#e0525210', border: '1px solid #e0525225', borderRadius: 6, padding: '7px 12px', marginBottom: 8 }}>
+        ⚠ Exit: 10 EMA close below (daily) → warning. 20 EMA close below → full exit. VWAP + 50 EMA lost → immediate full exit.
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '8px 12px', border: '1px solid var(--border)', lineHeight: 1.7 }}>
+        <span style={{ color: 'var(--text-2)' }}>Delivery rules:</span> Daily MACD crossover → pullback entry only, not breakout chase. Set a review date before entering. Use 75-min chart for context, 15-min for entry trigger. No delivery entries on high-VIX days (above 18).
+      </div>
+    </div>
+  )
+}
+
+function PreMarketChecklist() {
+  const [checkState, setCheckState] = useState<Record<string, boolean | null>>({})
+  const [loading, setLoading]       = useState(true)
+  const [saving, setSaving]         = useState(false)
+  const [subTab, setSubTab]         = useState<'gonogo' | 'selection'>('gonogo')
+  const [dateLabel, setDateLabel]   = useState('')
+
+  useEffect(() => {
+    fetch('/api/checklist')
+      .then(r => r.json())
+      .then(({ state, date }: { state: Record<string, boolean>; date: string }) => {
+        setCheckState(state ?? {})
+        setDateLabel(date.replace('checklist:', ''))
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const persist = useCallback(async (next: Record<string, boolean | null>) => {
+    setSaving(true)
+    try {
+      await fetch('/api/checklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      })
+    } catch (_) {}
+    setSaving(false)
+  }, [])
+
+  const handleToggle = (id: string, value: boolean | null) => {
+    setCheckState(prev => {
+      const next = { ...prev, [id]: value }
+      persist(next)
+      return next
+    })
+  }
+
+  const handleReset = () => { setCheckState({}); persist({}) }
+
+  const mode    = getParticipationMode(checkState)
+  const modeCfg = PARTICIPATION_CONFIG[mode]
+  const greenCount = GO_NOGO_ITEMS.filter(i => checkState[i.id] === true).length
+  const redCount   = GO_NOGO_ITEMS.filter(i => checkState[i.id] === false).length
+
+  if (loading) return (
+    <div style={{ padding: '48px 0', textAlign: 'center', color: 'var(--text-3)', fontFamily: 'var(--mono)', fontSize: 12 }}>
+      Loading checklist…
+    </div>
+  )
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
+          {dateLabel ? `Session: ${dateLabel}` : 'Today'} · Resets each trading day
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {saving && <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>saving…</span>}
+          <button onClick={handleReset} style={{ padding: '4px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {/* Sub-tab toggle */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+        {([{ key: 'gonogo', label: 'Go / No-Go' }, { key: 'selection', label: 'Stock Selection' }] as const).map(({ key, label }) => {
+          const active = subTab === key
+          return (
+            <button key={key} onClick={() => setSubTab(key)} style={{
+              background: active ? 'var(--bg-card)' : 'transparent',
+              border: `1px solid ${active ? 'var(--border-lit)' : 'var(--border)'}`,
+              borderRadius: 7, color: active ? 'var(--text)' : 'var(--text-2)',
+              padding: '7px 16px', fontSize: 12, fontWeight: active ? 500 : 400, cursor: 'pointer',
+            }}>{label}</button>
+          )
+        })}
+      </div>
+
+      {/* Go/No-Go panel */}
+      {subTab === 'gonogo' && (
+        <div>
+          <div style={{
+            background: modeCfg.bg, border: `1px solid ${modeCfg.border}`,
+            borderRadius: 8, padding: '12px 16px', marginBottom: 14,
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: modeCfg.color, flexShrink: 0, display: 'inline-block' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: modeCfg.color, fontFamily: 'var(--mono)', letterSpacing: '0.06em' }}>{modeCfg.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{modeCfg.sub}</div>
+            </div>
+            {mode !== 'INCOMPLETE' && (
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <span style={{ fontSize: 12, fontFamily: 'var(--mono)', background: '#00cc8815', color: '#00cc88', borderRadius: 5, padding: '2px 9px', fontWeight: 600 }}>{greenCount}✓</span>
+                <span style={{ fontSize: 12, fontFamily: 'var(--mono)', background: '#e0525215', color: '#e05252', borderRadius: 5, padding: '2px 9px', fontWeight: 600 }}>{redCount}✗</span>
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', marginBottom: 12 }}>
+            ≥4 green → full &nbsp;·&nbsp; 3 green → reduced size (−50%) &nbsp;·&nbsp; ≤2 green → avoid intraday
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {GO_NOGO_ITEMS.map(item => (
+              <GoNoGoCard key={item.id} item={item} value={checkState[item.id] ?? null} onChange={handleToggle} />
+            ))}
+          </div>
+          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '8px 12px', border: '1px solid var(--border)', lineHeight: 1.7 }}>
+            <span style={{ color: 'var(--text-2)' }}>VIX override:</span> VIX 17–18 → cut size 50% regardless of score. VIX above 20 → no new entries at all.
+          </div>
+        </div>
+      )}
+
+      {/* Stock Selection panel */}
+      {subTab === 'selection' && <StockSelectionPanel />}
+    </div>
+  )
+}
+
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
   const [data, setData]             = useState<SignalsResponse | null>(null)
   const [error, setError]           = useState<string | null>(null)
-  const [tab, setTab]               = useState<'intraday' | 'delivery' | 'history'>('intraday')
+  const [tab, setTab]               = useState<'premarket' | 'signals' | 'history'>('premarket')
+  const [signalsSubTab, setSignalsSubTab] = useState<'intraday' | 'delivery'>('intraday')
   const [showSettings, setShowSettings] = useState(false)
   const [regime, setRegime]         = useState<SessionRegime>('CLOSED')
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -649,7 +932,7 @@ export default function Home() {
     } catch { /* silently ignore */ }
   }
 
-  const signals = tab === 'intraday' ? (data?.intraday ?? []) : tab === 'delivery' ? (data?.delivery ?? []) : []
+  const signals = signalsSubTab === 'intraday' ? (data?.intraday ?? []) : (data?.delivery ?? [])
   const intradayCount = data?.intraday.length ?? 0
   const deliveryCount = data?.delivery.length ?? 0
 
@@ -728,13 +1011,16 @@ export default function Home() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-          {(['intraday', 'delivery'] as const).map(t => {
-            const count = t === 'intraday' ? intradayCount : deliveryCount
-            const active = tab === t
+          {([
+            { key: 'premarket', label: 'Pre-Market' },
+            { key: 'signals',   label: 'Signals' },
+            { key: 'history',   label: 'History' },
+          ] as const).map(({ key, label }) => {
+            const active = tab === key
             return (
               <button
-                key={t}
-                onClick={() => setTab(t)}
+                key={key}
+                onClick={() => setTab(key)}
                 style={{
                   background: active ? 'var(--bg-card)' : 'transparent',
                   border: `1px solid ${active ? 'var(--border-lit)' : 'var(--border)'}`,
@@ -743,41 +1029,65 @@ export default function Home() {
                   cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
                 }}
               >
-                {t === 'intraday' ? 'Intraday' : (
-                  <>
-                    Delivery
-                    <span title="Positional trades. Typical holding: 3–10 days. Not intraday." style={{ cursor: 'help', opacity: 0.5, fontSize: 11 }}>ⓘ</span>
-                  </>
-                )}
-                {count > 0 && (
+                {label}
+                {key === 'signals' && (intradayCount + deliveryCount) > 0 && (
                   <span style={{
                     fontSize: 11, fontFamily: 'var(--mono)',
-                    background: t === 'intraday' ? 'var(--blue-bg)' : 'var(--green-bg)',
-                    color: t === 'intraday' ? 'var(--blue)' : 'var(--green)',
+                    background: 'var(--blue-bg)', color: 'var(--blue)',
                     borderRadius: 8, padding: '1px 7px',
                   }}>
-                    {count}
+                    {intradayCount + deliveryCount}
                   </span>
                 )}
               </button>
             )
           })}
-          <button
-            onClick={() => setTab('history')}
-            style={{
-              background: tab === 'history' ? 'var(--bg-card)' : 'transparent',
-              border: `1px solid ${tab === 'history' ? 'var(--border-lit)' : 'var(--border)'}`,
-              borderRadius: 7, color: tab === 'history' ? 'var(--text)' : 'var(--text-2)',
-              padding: '8px 18px', fontSize: 13, fontWeight: tab === 'history' ? 500 : 400,
-              cursor: 'pointer',
-            }}
-          >
-            History
-          </button>
         </div>
 
-        {/* Signal list / History tab */}
-        {tab === 'history' ? (
+        {/* Signals sub-tabs — only when Signals tab is active */}
+        {tab === 'signals' && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+            {(['intraday', 'delivery'] as const).map(t => {
+              const count = t === 'intraday' ? intradayCount : deliveryCount
+              const active = signalsSubTab === t
+              return (
+                <button
+                  key={t}
+                  onClick={() => setSignalsSubTab(t)}
+                  style={{
+                    background: active ? 'var(--bg-subtle)' : 'transparent',
+                    border: `1px solid ${active ? 'var(--border-lit)' : 'var(--border)'}`,
+                    borderRadius: 6, color: active ? 'var(--text)' : 'var(--text-3)',
+                    padding: '5px 14px', fontSize: 12, fontWeight: active ? 500 : 400,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7,
+                  }}
+                >
+                  {t === 'intraday' ? 'Intraday' : (
+                    <>
+                      Delivery
+                      <span title="Positional trades. Typical holding: 3–10 days. Not intraday." style={{ cursor: 'help', opacity: 0.5, fontSize: 11 }}>ⓘ</span>
+                    </>
+                  )}
+                  {count > 0 && (
+                    <span style={{
+                      fontSize: 10, fontFamily: 'var(--mono)',
+                      background: t === 'intraday' ? 'var(--blue-bg)' : 'var(--green-bg)',
+                      color: t === 'intraday' ? 'var(--blue)' : 'var(--green)',
+                      borderRadius: 8, padding: '1px 6px',
+                    }}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Tab content */}
+        {tab === 'premarket' ? (
+          <PreMarketChecklist />
+        ) : tab === 'history' ? (
           <HistoryTab />
         ) : error ? (
           <div style={{ textAlign: 'center', padding: '50px 20px' }}>
@@ -792,7 +1102,7 @@ export default function Home() {
             <div style={{ fontSize: 11 }}>Connecting to signal engine</div>
           </div>
         ) : signals.length === 0 ? (
-          <EmptyState tab={tab} marketOpen={data.marketOpen} inWindow={data.inActiveWindow} />
+          <EmptyState tab={signalsSubTab} marketOpen={data.marketOpen} inWindow={data.inActiveWindow} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {signals.map(s => (
