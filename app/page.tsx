@@ -230,15 +230,42 @@ function SignalCard({ signal, onPatch }: {
           </div>
         </div>
 
-        {/* Row 2: universal exit rule */}
-        <div style={{
-          fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)',
-          background: '#e0525210', border: '1px solid #e0525225',
-          borderRadius: 4, padding: '3px 8px', marginBottom: 12,
-          display: 'inline-block',
-        }}>
-          Exit trigger: loses VWAP + 50 EMA simultaneously → full exit
-        </div>
+        {/* Row 2: module-aware exit rules */}
+        {signal.module === 'INTRADAY' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+            <div style={{
+              fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)',
+              background: '#e0525210', border: '1px solid #e0525225',
+              borderRadius: 4, padding: '3px 8px', display: 'inline-block',
+            }}>
+              🔴 Stop: 5-min candle CLOSE below VWAP — not a wick, not intracandle
+            </div>
+            <div style={{
+              fontSize: 11, color: '#f0b429', fontFamily: 'var(--mono)',
+              background: '#f0b42910', border: '1px solid #f0b42925',
+              borderRadius: 4, padding: '3px 8px', display: 'inline-block',
+            }}>
+              🟡 Scale out: Sell 50% at +1% · Trail remainder on 9 EMA 5-min close
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+            <div style={{
+              fontSize: 11, color: '#00cc88', fontFamily: 'var(--mono)',
+              background: '#00cc8810', border: '1px solid #00cc8825',
+              borderRadius: 4, padding: '3px 8px', display: 'inline-block',
+            }}>
+              🟢 Scale out: Sell 50% at +8–10% · Trail remainder on 9 EMA daily close
+            </div>
+            <div style={{
+              fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)',
+              background: '#e0525210', border: '1px solid #e0525225',
+              borderRadius: 4, padding: '3px 8px', display: 'inline-block',
+            }}>
+              🔴 Full exit: 20 EMA daily close below · Early warning: 10 EMA close below
+            </div>
+          </div>
+        )}
 
         {/* Row 3: price fields */}
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: rrDisplay ? 10 : 0 }}>
@@ -685,56 +712,213 @@ function RuleCard({ title, rules, trailLabel, trailColor }: {
   )
 }
 
+function SectionHeader({ color, label }: { color: string; label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, marginTop: 4 }}>
+      <div style={{ width: 3, height: 14, background: color, borderRadius: 2 }} />
+      <span style={{ fontSize: 10, fontWeight: 600, fontFamily: 'var(--mono)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'var(--text-2)' }}>{label}</span>
+    </div>
+  )
+}
+
+function CollapsibleSection({ title, color, children, defaultOpen = false }: {
+  title: string; color: string; children: React.ReactNode; defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: `${color}10`, border: `1px solid ${color}30`, borderRadius: open ? '6px 6px 0 0' : 6,
+          padding: '8px 12px', cursor: 'pointer', color: color,
+          fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+        }}
+      >
+        <span>{title}</span>
+        <span style={{ fontSize: 10, opacity: 0.7 }}>{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div style={{
+          border: `1px solid ${color}30`, borderTop: 'none',
+          borderRadius: '0 0 6px 6px', padding: '12px 12px 8px',
+          background: 'var(--bg-card)',
+        }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StockSelectionPanel() {
   return (
     <div style={{ paddingBottom: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, marginTop: 4 }}>
-        <div style={{ width: 3, height: 14, background: 'var(--blue)', borderRadius: 2 }} />
-        <span style={{ fontSize: 10, fontWeight: 600, fontFamily: 'var(--mono)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'var(--text-2)' }}>Intraday — Entry Criteria</span>
-      </div>
-      <RuleCard title="Path 1 — VWAP Breakout" trailLabel="9 EMA close" trailColor="#00cc88" rules={[
-        'RSI crosses above 70 on 1-min chart',
-        'Price above VWAP on 3-min chart',
-        'MACD bullish on 5-min chart',
-        'Best window: Power Hour (9:15 – 11:00)',
-      ]} />
-      <RuleCard title="Path 2 — EMA Pullback" trailLabel="20 EMA close" trailColor="#a78bfa" rules={[
-        'Price touching 10 or 20 EMA on 5-min chart',
-        'EMAs stacked bullishly at point of touch',
-        'MACD bullish on 5-min chart',
-        'RSI cooled to 45–65 range (not extended)',
-        '50 EMA pullbacks excluded — too risky',
-      ]} />
-      <div style={{ fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)', background: '#e0525210', border: '1px solid #e0525225', borderRadius: 6, padding: '7px 12px', marginBottom: 8 }}>
-        ⚠ Universal exit: loses VWAP + 50 EMA simultaneously → full exit, no trail
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '8px 12px', border: '1px solid var(--border)', lineHeight: 1.7, marginBottom: 16 }}>
-        <span style={{ color: 'var(--text-2)' }}>Session rules:</span> Graveyard (11–1 PM): manage runners only, no new entries. Daily MACD crossover stock → pullback entry on 15-min only. VIX above 17: cut size 50%. VIX above 20: no new entries.
+
+      {/* Hard entry rule — always visible, pinned top */}
+      <div style={{
+        fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)',
+        background: '#e0525212', border: '1px solid #e0525240',
+        borderRadius: 6, padding: '8px 12px', marginBottom: 14,
+        lineHeight: 1.7,
+      }}>
+        <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>⛔ HARD RULE:</span> No entry if price is below VWAP AND below 50 EMA simultaneously — regardless of news, catalyst, or broker tip.
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <div style={{ width: 3, height: 14, background: 'var(--green)', borderRadius: 2 }} />
-        <span style={{ fontSize: 10, fontWeight: 600, fontFamily: 'var(--mono)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'var(--text-2)' }}>Delivery — Entry Criteria</span>
+      {/* Capital sizing table */}
+      <div style={{
+        background: 'var(--bg-subtle)', border: '1px solid var(--border)',
+        borderRadius: 6, padding: '10px 12px', marginBottom: 16, fontSize: 11,
+        fontFamily: 'var(--mono)', color: 'var(--text-3)', lineHeight: 1.9,
+      }}>
+        <div style={{ color: 'var(--text-2)', fontWeight: 600, marginBottom: 6, fontSize: 12 }}>Capital Sizing</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '2px 12px', marginBottom: 8 }}>
+          <span style={{ color: 'var(--text-3)' }}>A/D Ratio</span>
+          <span style={{ color: 'var(--text-3)' }}>Intraday</span>
+          <span style={{ color: 'var(--text-3)' }}>Delivery</span>
+          <span style={{ color: '#00cc88' }}>&gt;70</span>
+          <span style={{ color: 'var(--text-2)' }}>₹1,00,000</span>
+          <span style={{ color: 'var(--text-2)' }}>₹2,00,000</span>
+          <span style={{ color: '#f0b429' }}>50–70</span>
+          <span style={{ color: 'var(--text-2)' }}>₹75,000</span>
+          <span style={{ color: 'var(--text-2)' }}>₹1,50,000</span>
+          <span style={{ color: '#e05252' }}>&lt;50</span>
+          <span style={{ color: 'var(--text-2)' }}>₹50,000</span>
+          <span style={{ color: 'var(--text-2)' }}>₹1,00,000</span>
+        </div>
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, lineHeight: 1.8 }}>
+          <span style={{ color: 'var(--text-2)' }}>Nifty RSI override: </span>
+          &gt;75 → ₹50k max · 50–75 → ₹75k–1L · 35–55 → half or no trade · &lt;35 → oversold bounce only
+        </div>
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 4, color: 'var(--text-2)' }}>
+          Daily hard stop: ₹3,000 · Daily goal: ₹2,000 · Max 2 intraday positions simultaneously
+        </div>
       </div>
-      <RuleCard title="Setup 1 — Momentum Breakout" trailLabel="20 EMA on daily" trailColor="#00cc88" rules={[
-        'EMA stack bullish on daily (short above medium above long)',
-        'MACD bullish on daily chart',
-        'RSI in momentum zone, not overbought',
-        'Volume confirming the move',
-        'Entry in range — not at breakout highs',
-      ]} />
-      <RuleCard title="Setup 2 — Trend Continuation Pullback" trailLabel="20 EMA on daily" trailColor="#00cc88" rules={[
-        'Same EMA stack and MACD conditions as Setup 1',
-        'Stock pulling back within an intact uptrend',
-        'RSI cooled during the pullback (not extended)',
-        'Entry as price stabilises near 20 EMA on daily',
-      ]} />
-      <div style={{ fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)', background: '#e0525210', border: '1px solid #e0525225', borderRadius: 6, padding: '7px 12px', marginBottom: 8 }}>
-        ⚠ Exit: 10 EMA close below (daily) → warning. 20 EMA close below → full exit. VWAP + 50 EMA lost → immediate full exit.
+
+      {/* ── Strategy 1: Momentum Intraday ── */}
+      <SectionHeader color="var(--blue)" label="Strategy 1 — Momentum Intraday" />
+      <CollapsibleSection title="Qualification + Entry" color="#3d8ef0" defaultOpen={true}>
+        <RuleCard title="15-min — The Boss (must qualify)" trailLabel="qualifies only" trailColor="#5a6070" rules={[
+          'Price above VWAP on 15-min',
+          '9 EMA above 50 EMA — bullish stack',
+          '15-min RSI between 50–70',
+          '15-min MACD bullish (fast line above signal)',
+        ]} />
+        <RuleCard title="5-min — The Trigger (entry timing)" trailLabel="9 EMA 5-min close" trailColor="#3d8ef0" rules={[
+          'Wait for VWAP breakout on 5-min',
+          'Confirm 1-min MACD crossover after VWAP reclaim',
+          'RSI > 50 on 5-min',
+          'Enter on next candle open after crossover',
+        ]} />
+        <div style={{ fontSize: 11, color: '#f0b429', fontFamily: 'var(--mono)', background: '#f0b42910', border: '1px solid #f0b42925', borderRadius: 5, padding: '6px 10px', marginBottom: 6 }}>
+          🟡 Partial exit: Sell 50% at +1% · Trail remainder on 9 EMA 5-min close
+        </div>
+        <div style={{ fontSize: 11, color: '#f0b429', fontFamily: 'var(--mono)', background: '#f0b42910', border: '1px solid #f0b42925', borderRadius: 5, padding: '6px 10px', marginBottom: 6 }}>
+          🏆 Winner upgrade: once 15-min MACD confirms bullish → switch trail to 9 EMA 15-min close · Hold until 9 EMA 15-min broken or RSI &gt; 75 on 15-min
+        </div>
+        <div style={{ fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)', background: '#e0525210', border: '1px solid #e0525225', borderRadius: 5, padding: '6px 10px', marginBottom: 6 }}>
+          🔴 Stop: 5-min candle CLOSE below VWAP — not a wick, not intracandle
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', lineHeight: 1.7, paddingTop: 4 }}>
+          Re-entry after stop: valid only if EMAs still stacked bullishly + MACD positive + price reclaims VWAP → wait for 1-min MACD crossover before re-entering.
+        </div>
+      </CollapsibleSection>
+      <CollapsibleSection title="Scanner Criteria (daily timeframe)" color="#3d8ef0">
+        <RuleCard title="Universe filters" trailLabel="Power Hour only" trailColor="#3d8ef0" rules={[
+          'MCap > ₹10,000 Cr · Price > ₹100',
+          'Daily volume > 1,00,000 shares',
+          'Volume surge > 1.5× 20-day average',
+          'Price > 20 EMA on daily · Daily RSI 50–65',
+          'Remove from watchlist if VWAP-to-price gap is excessive at open',
+          'Sector momentum bonus: 2+ stocks in same sector showing VWAP reclaim = higher conviction',
+        ]} />
+      </CollapsibleSection>
+
+      {/* ── Strategy 2: Swing Delivery ── */}
+      <div style={{ marginTop: 16 }}>
+        <SectionHeader color="var(--green)" label="Strategy 2 — Swing Delivery" />
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '8px 12px', border: '1px solid var(--border)', lineHeight: 1.7 }}>
-        <span style={{ color: 'var(--text-2)' }}>Delivery rules:</span> Daily MACD crossover → pullback entry only, not breakout chase. Set a review date before entering. Use 75-min chart for context, 15-min for entry trigger. No delivery entries on high-VIX days (above 18).
+      <CollapsibleSection title="Qualification + Entry" color="#00cc88" defaultOpen={true}>
+        <RuleCard title="Daily chart — all 5 must be true" trailLabel="9 EMA daily close" trailColor="#00cc88" rules={[
+          '9 EMA above 50 EMA on daily (bullish stack)',
+          'Price above both EMAs — not between them',
+          'Daily RSI 50–65 — trending, room to run',
+          'MACD bullish crossover on daily — histogram green',
+          'Volume on breakout candle above 20-day average',
+        ]} />
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', lineHeight: 1.7, paddingBottom: 6 }}>
+          Entry trigger: base formation (3–5 days consolidation) + breakout above base on above-average volume. Entry zone: breakout candle close, or pullback to breakout level next session.
+        </div>
+        <div style={{ fontSize: 11, color: '#00cc88', fontFamily: 'var(--mono)', background: '#00cc8810', border: '1px solid #00cc8825', borderRadius: 5, padding: '6px 10px', marginBottom: 6 }}>
+          🟢 Partial exit: Sell 50% at +8–10% · Trail remainder on 9 EMA daily close
+        </div>
+        <div style={{ fontSize: 11, color: '#f0b429', fontFamily: 'var(--mono)', background: '#f0b42910', border: '1px solid #f0b42925', borderRadius: 5, padding: '6px 10px', marginBottom: 6 }}>
+          ⚠ Early warning: 10 EMA daily close below → tighten trail
+        </div>
+        <div style={{ fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)', background: '#e0525210', border: '1px solid #e0525225', borderRadius: 5, padding: '6px 10px', marginBottom: 6 }}>
+          🔴 Full exit: 20 EMA daily close below — no questions asked
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', lineHeight: 1.7, paddingTop: 2 }}>
+          Stop: daily close below 50 EMA · Max hold: 6 weeks · Max 3 delivery positions · No single position above 20% of delivery portfolio
+        </div>
+      </CollapsibleSection>
+      <CollapsibleSection title="Fundamental Check (minimum)" color="#00cc88">
+        <RuleCard title="Before any swing entry" trailLabel="50% value · 50% momentum" trailColor="#00cc88" rules={[
+          'Core business generating revenue — not a story stock',
+          'Debt manageable, not spiralling',
+          'Catalyst or sector tailwind present',
+          'No major event risk within 2 weeks (results, regulatory)',
+          'Entry only after base + breakout — never into active downtrend',
+        ]} />
+      </CollapsibleSection>
+
+      {/* ── Strategy 3: Oversold Bounce ── */}
+      <div style={{ marginTop: 16 }}>
+        <SectionHeader color="#f0b429" label="Strategy 3 — Oversold Bounce (Counter-trend)" />
       </div>
+      <div style={{ fontSize: 11, color: '#f0b429', fontFamily: 'var(--mono)', background: '#f0b42910', border: '1px solid #f0b42930', borderRadius: 6, padding: '7px 12px', marginBottom: 8, lineHeight: 1.6 }}>
+        ⚠ Lower conviction than Strategies 1 & 2. Max 1 per day · Max position: ₹20,000 · Target is mean reversion only — not full recovery.
+      </div>
+      <CollapsibleSection title="3-Stage Qualification" color="#f0b429">
+        <RuleCard title="Stage 1 — Daily Scan (all must be true)" trailLabel="counter-trend" trailColor="#f0b429" rules={[
+          'Daily RSI below 35 (oversold threshold)',
+          'Stock down > 15% from recent 52-week high',
+          'Identifiable reason for the fall (news, sector, earnings)',
+          'MCap > ₹5,000 Cr — avoid micro/small cap traps',
+          'Max 3 oversold bounce candidates on watchlist at any time',
+        ]} />
+        <RuleCard title="Stage 2 — Fundamental Viability" trailLabel="business intact?" trailColor="#f0b429" rules={[
+          'Core business still generating revenue?',
+          'Debt manageable — not spiralling?',
+          'Competitive position intact?',
+          'If NO to any one → remove from list regardless of RSI',
+        ]} />
+        <RuleCard title="Stage 3 — Chart Exhaustion (2 of 4 required)" trailLabel="exhaustion signal" trailColor="#f0b429" rules={[
+          'RSI making higher low while price makes lower low — bullish divergence',
+          'MACD histogram red bars getting smaller — momentum exhaustion',
+          'Volume spike on down day, lower volume on subsequent down days — capitulation',
+          'Price closing above previous day\'s open despite being down — reversal candle',
+        ]} />
+      </CollapsibleSection>
+      <CollapsibleSection title="Intraday Entry + Exit" color="#f0b429">
+        <RuleCard title="15-min confirmation (all 3 required)" trailLabel="to 20 EMA daily" trailColor="#f0b429" rules={[
+          'Price reclaims VWAP on 15-min candle close',
+          '15-min RSI crosses above 35 — momentum turning',
+          '15-min MACD histogram turns from red to green',
+          'First 15 minutes: observe only — gap-up open is a warning (bounce may be priced in)',
+        ]} />
+        <div style={{ fontSize: 11, color: '#00cc88', fontFamily: 'var(--mono)', background: '#00cc8810', border: '1px solid #00cc8825', borderRadius: 5, padding: '6px 10px', marginBottom: 6 }}>
+          🟢 Target 1: 20 EMA daily → Sell 50% · Target 2: 50 EMA daily → Sell remainder
+        </div>
+        <div style={{ fontSize: 11, color: '#e05252', fontFamily: 'var(--mono)', background: '#e0525210', border: '1px solid #e0525225', borderRadius: 5, padding: '6px 10px', marginBottom: 6 }}>
+          🔴 Stop: 5-min candle close below the entry day's low (not VWAP — the day's low)
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', lineHeight: 1.7, paddingTop: 2 }}>
+          Do not hold for full recovery. Once 20 EMA daily is reached, the trade is done.
+        </div>
+      </CollapsibleSection>
+
     </div>
   )
 }
@@ -848,8 +1032,15 @@ function PreMarketChecklist() {
               <GoNoGoCard key={item.id} item={item} value={checkState[item.id] ?? null} onChange={handleToggle} />
             ))}
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '8px 12px', border: '1px solid var(--border)', lineHeight: 1.7 }}>
-            <span style={{ color: 'var(--text-2)' }}>VIX override:</span> VIX 17–18 → cut size 50% regardless of score. VIX above 20 → no new entries at all.
+          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)', background: 'var(--bg-subtle)', borderRadius: 6, padding: '8px 12px', border: '1px solid var(--border)', lineHeight: 1.9 }}>
+            <div style={{ marginBottom: 4 }}><span style={{ color: 'var(--text-2)' }}>VIX override:</span> VIX 17–18 → cut size 50% regardless of score. VIX above 20 → no new entries at all.</div>
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+              <span style={{ color: 'var(--text-2)' }}>Nifty RSI sizing:</span>{' '}
+              <span style={{ color: '#e05252' }}>&gt;75 → ₹50k max</span> ·{' '}
+              <span style={{ color: '#f0b429' }}>50–75 → ₹75k–1L</span> ·{' '}
+              <span style={{ color: '#e05252' }}>35–55 → half or no trade</span> ·{' '}
+              <span style={{ color: '#e05252' }}>&lt;35 → oversold bounce only</span>
+            </div>
           </div>
         </div>
       )}
