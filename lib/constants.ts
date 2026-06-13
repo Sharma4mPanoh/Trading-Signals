@@ -1,6 +1,5 @@
 export const INTRADAY_SCANS: Record<string, string> = {
   VWAP_BREAKOUT: 'VWAP_BREAKOUT',
-  EMA_PULLBACK:  'EMA_PULLBACK',
 }
 
 export const DELIVERY_SCANS: Record<string, string> = {
@@ -15,31 +14,24 @@ export const ALL_SCAN_IDS = [
 
 export const SCAN_LABELS: Record<string, string> = {
   VWAP_BREAKOUT:     'VWAP Breakout',
-  EMA_PULLBACK:      'EMA Pullback',
   MOMENTUM_BREAKOUT: 'Momentum Breakout',
   TREND_PULLBACK:    'Trend Pullback',
 }
 
 export const SCAN_DESCRIPTIONS: Record<string, string> = {
-  VWAP_BREAKOUT:     'RSI > 70 · Price above VWAP · MACD bullish crossover',
-  EMA_PULLBACK:      '10/20 EMA touch · MACD signal · RSI 45–65 range',
-  MOMENTUM_BREAKOUT: 'Price > 20 EMA · MACD cross · RSI 55–68 zone',
-  TREND_PULLBACK:    'Price near 20 EMA · EMAs stacked · RSI 45–60 zone',
+  VWAP_BREAKOUT:     'RSI 50-65 · Price above VWAP · 9 EMA above 50 EMA · MACD bullish',
+  MOMENTUM_BREAKOUT: 'Price > both EMAs · MACD cross · RSI 50-65 · Volume surge',
+  TREND_PULLBACK:    'Price near 20 EMA · EMAs stacked · RSI 45-60 · MACD above zero',
 }
 
-// Trail method by scan type — per the trading framework
-// VWAP breakout → trail 9 EMA close
-// EMA pullback  → trail 20 EMA close
 export const SCAN_TRAIL_METHOD: Record<string, 'EMA_9' | 'EMA_20'> = {
   VWAP_BREAKOUT:     'EMA_9',
-  EMA_PULLBACK:      'EMA_20',
   MOMENTUM_BREAKOUT: 'EMA_20',
   TREND_PULLBACK:    'EMA_20',
 }
 
 export const SCAN_COLORS: Record<string, string> = {
   VWAP_BREAKOUT:     '#3d8ef0',
-  EMA_PULLBACK:      '#a78bfa',
   MOMENTUM_BREAKOUT: '#00cc88',
   TREND_PULLBACK:    '#f0b429',
 }
